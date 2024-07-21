@@ -7,9 +7,13 @@
 [![Conda-Forge][conda-badge]][conda-link]
 [![PyPI platforms][pypi-platforms]][pypi-link]
 
-[![GitHub Discussion][github-discussions-badge]][github-discussions-link]
-
 <!-- SPHINX-START -->
+
+`mergeplg` is a collection of methods to merge rainfall sensor data from point,
+line and grid geometries. Typically the sensors are rain gauges (point), CML or
+SML (line) and weather radar or satellites (grid).
+
+This package is currently in a very early stage of development.
 
 <!-- prettier-ignore-start -->
 [actions-badge]:            https://github.com/OpenSenseAction/mergeplg/workflows/CI/badge.svg
