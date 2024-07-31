@@ -103,6 +103,7 @@ disallow_incomplete_defs = true
 
 [tool.ruff]
 src = ["src"]
+line-length = 88
 target-version = "py310"
 extend-include = ["*.ipynb"]
 
@@ -154,6 +155,8 @@ ignore = [
 "docs/notebooks/**" = ["T201"] # allow print statement in notebooks
 "docs/conf.py" = ["D100", "A001"]
 
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.pylint]
 py-version = "3.10"
