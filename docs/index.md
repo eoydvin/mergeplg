@@ -1,13 +1,14 @@
 # mergeplg
 
-```{toctree}
-:maxdepth: 2
-:hidden:
-
-```
-
 ```{include} ../README.md
 :start-after: <!-- SPHINX-START -->
+```
+
+```{toctree}
+:caption: Examples
+:hidden:
+
+notebooks/foo_example.ipynb
 ```
 
 ## Indices and tables
