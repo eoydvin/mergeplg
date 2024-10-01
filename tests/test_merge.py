@@ -120,11 +120,15 @@ def test_merge_additive_idw():
         cml_r = ds_cmls.sel(cml_id=cml_id).R
         ds_cmls["R_diff"].loc[{"cml_id": cml_id}] = cml_r - rad_r
 
-    additive_idw = merge.merge_additive_idw(
-        ds_cmls.R_diff.isel(time=0), ds_rad.R.isel(time=0), where_rad=True, min_obs=3
+    x0 = np.hstack(
+        [
+            ds_cmls.y.data.reshape(-1, 1),
+            ds_cmls.x.data.reshape(-1, 1),
+        ]
     )
-
-    print(additive_idw)
+    additive_idw = merge.merge_additive_idw(
+        ds_rad.R.isel(time=0), ds_cmls.R_diff.isel(time=0).data.ravel(), x0
+    )
 
     # Check that radar is conditioned to point observations
     for cml_id in ds_cmls.cml_id:
@@ -156,12 +160,10 @@ def test_merge_additive_blockkriging():
 
     # do additive blockkriging
     additive_blockkriging = merge.merge_additive_blockkriging(
-        ds_cmls.R_diff.isel(time=0),
         ds_rad.R.isel(time=0),
+        ds_cmls.R_diff.isel(time=0).data,
         x0,
         variogram,
-        where_rad=True,
-        min_obs=3,
     )
 
     # Is not strightforward to check the line integrals as that would be an
@@ -176,3 +178,44 @@ def test_merge_additive_blockkriging():
     )
 
     np.testing.assert_almost_equal(additive_blockkriging, data_check)
+
+
+def test_merge_ked_blockkriging():
+    # Calculate CML-radar difference
+    ds_cmls["cml_rad"] = xr.full_like(ds_cmls.R, 0)
+    for cml_id in ds_cmls.cml_id:
+        rad_r = ds_rad.sel(
+            x=ds_cmls.sel(cml_id=cml_id).x,
+            y=ds_cmls.sel(cml_id=cml_id).y,
+        ).R
+
+        ds_cmls["cml_rad"].loc[{"cml_id": cml_id}] = rad_r
+
+    # Calculate CML geometry
+    x0 = merge.calculate_cml_geometry(ds_cmls)
+
+    # Define variogram (exponential)
+    def variogram(h):  # Exponential variogram
+        return 0 + (1 - 0) * (1 - np.exp(-h * 3 / 1))
+
+    # do additive blockkriging
+    ked = merge.merge_ked_blockkriging(
+        ds_rad.R.isel(time=0),
+        ds_cmls.cml_rad.isel(time=0).data,
+        ds_cmls.R.isel(time=0).data,
+        x0,
+        variogram,
+    )
+
+    # Is not strightforward to check the line integrals as that would be an
+    # approximation. We therefore check the full matrix against a copy for now.
+    data_check = np.array(
+        [
+            [1.44257989, 4.60679755, 5.20351533, 5.24607484],
+            [4.20176434, 0.44431991, 4.85025407, 5.28417687],
+            [5.25647569, 7.53645848, 2.51821776, 5.64689963],
+            [5.32243757, 6.10865941, 9.55481817, 6.18926484],
+        ]
+    )
+
+    np.testing.assert_almost_equal(ked, data_check)
