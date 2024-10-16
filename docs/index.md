@@ -8,7 +8,7 @@
 :caption: Examples
 :hidden:
 
-notebooks/foo_example.ipynb
+notebooks/openMRG_case_RADOLAN.ipynb
 ```
 
 ## Indices and tables

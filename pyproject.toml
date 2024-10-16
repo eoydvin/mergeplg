@@ -37,7 +37,7 @@ sphinx-autodoc-typehints = { version = "*", optional = true }
 docutils = { version = "!=0.21.post1", optional = true }
 nbsphinx = { version = "*", optional = true }
 nbmake = { version = ">=1.4.6", optional = true}
-
+ipython = { version = "*", optional = true }
 pykrige = ">=1.7.2"
 poligrain = ">=0.1.0"
 scipy = ">=1.14.0"
@@ -47,7 +47,7 @@ xarray = ">=2024.6.0"
 wradlib = ">=2.0.3"
 scikit-learn = ">=1.5.1"
 scikit-gstat = ">=1.0.17"
-
+numba = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = ">= 6"
@@ -64,10 +64,13 @@ docs = [
   "sphinx_copybutton",
   "docutils",
   "nbsphinx",
+  "ipython",
 ]
 
 [tool.poetry.group.dev.dependencies]
-jupyterlab = "^4.2.4"
+jupyterlab = ">=4.2.4"
+pre-commit = ">=3.7.1"
+pytest = ">=8.3.2"
 
 [tool.poetry-dynamic-versioning]
 enable = true
@@ -84,6 +87,9 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = [
   "error",
+  # TODO: Remove the line below once the problem is fixed upstream,
+  # see https://github.com/OpenSenseAction/poligrain/pull/69
+  "ignore::DeprecationWarning:xarray.core.common:157",
 ]
 log_cli_level = "INFO"
 testpaths = [
@@ -147,7 +153,7 @@ extend-select = [
   "W",        # style warnings
   "F",        # flakes
   "D",        # pydocstyle
-  "UP",        # pyupgrade
+  "UP",       # pyupgrade
 ]
 ignore = [
   "PLR09",    # Too many <...>

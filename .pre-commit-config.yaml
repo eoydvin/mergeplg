@@ -13,6 +13,7 @@ repos:
     rev: "v4.6.0"
     hooks:
       - id: check-added-large-files
+        args: ["--maxkb=5000"]
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-symlinks
@@ -61,7 +62,7 @@ repos:
     rev: "v2.3.0"
     hooks:
       - id: codespell
-        args: ["--skip=*.ipynb"]
+        args: ["--skip=*.ipynb, *.csv"]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: "v0.10.0.1"
