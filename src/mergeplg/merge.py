@@ -155,9 +155,6 @@ class Merge:
         grid_location_radar="center",
         min_obs=5,
     ):
-        # Check that both time dimensions are similar
-        if not (da_cml.time == da_rad.time).all():
-            raise ValueError
 
         # Check that there is radar or gauge data
         if (da_cml is None) and (da_gauge is None):
@@ -219,15 +216,15 @@ class Merge:
 
             da_gauge["radar"] = get_grid_at_points(
                 da_gridded_data=da_rad,
-                da_point_data=da_gauge,
+                da_point_data=da_gauge.obs,
             )
 
             # Set x and y coordinates of the raingauge to imitate a CML, this
             # is used in the block kriging code.
-            da_gauge = da_gauge.assign_coords(site_0_x=("id", da_gauge.x))
-            da_gauge = da_gauge.assign_coords(site_1_x=("id", da_gauge.x))
-            da_gauge = da_gauge.assign_coords(site_0_y=("id", da_gauge.y))
-            da_gauge = da_gauge.assign_coords(site_1_y=("id", da_gauge.y))
+            da_gauge = da_gauge.assign_coords(site_0_x=("id", da_gauge.x.data))
+            da_gauge = da_gauge.assign_coords(site_1_x=("id", da_gauge.x.data))
+            da_gauge = da_gauge.assign_coords(site_0_y=("id", da_gauge.y.data))
+            da_gauge = da_gauge.assign_coords(site_1_y=("id", da_gauge.y.data))
 
             # Add sensor type metadata
             da_gauge = da_gauge.assign_coords(
@@ -239,15 +236,29 @@ class Merge:
 
         # CML and radar data present
         if (da_gauge is not None) and (da_cml is not None):
+            # Check that all time dimensions are similar
+            if not (da_cml.time == da_rad.time).all():
+                raise ValueError
+            if not (da_gauge.time == da_rad.time).all():
+                raise ValueError
+                
             da_cml, da_gauge = xr.align(da_cml, da_gauge, join="inner")
             self.ds_obs = xr.merge([da_cml, da_gauge])
 
         # CML present, but not gauge
         elif (da_gauge is None) and (da_cml is not None):
+            # Check that both time dimensions are similar
+            if not (da_cml.time == da_rad.time).all():
+                raise ValueError
+                
             self.ds_obs = da_cml
 
         # CML not present, gauge is
         elif (da_gauge is not None) and (da_cml is None):
+            # Check that both time dimensions are similar
+            if not (da_gauge.time == da_rad.time).all():
+                raise ValueError
+                
             self.ds_obs = da_gauge
 
         # This exception should not be raised
