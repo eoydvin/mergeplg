@@ -101,15 +101,15 @@ def calculate_cml_geometry(ds_cmls, disc=8):
 
     """
     # Calculate discretized positions along the lines, store in numy array
-    xpos = np.zeros([ds_cmls.cml_id.size, disc + 1])  # shape (line, position)
-    ypos = np.zeros([ds_cmls.cml_id.size, disc + 1])
+    xpos = np.zeros([ds_cmls.obs_id.size, disc + 1])  # shape (line, position)
+    ypos = np.zeros([ds_cmls.obs_id.size, disc + 1])
 
     # For all CMLs
-    for block_i, cml_id in enumerate(ds_cmls.cml_id):
-        x_a = ds_cmls.sel(cml_id=cml_id).site_0_x.data
-        y_a = ds_cmls.sel(cml_id=cml_id).site_0_y.data
-        x_b = ds_cmls.sel(cml_id=cml_id).site_1_x.data
-        y_b = ds_cmls.sel(cml_id=cml_id).site_1_y.data
+    for block_i, obs_id in enumerate(ds_cmls.obs_id):
+        x_a = ds_cmls.sel(obs_id=obs_id).site_0_x.data
+        y_a = ds_cmls.sel(obs_id=obs_id).site_0_y.data
+        x_b = ds_cmls.sel(obs_id=obs_id).site_1_x.data
+        y_b = ds_cmls.sel(obs_id=obs_id).site_1_y.data
 
         # for all dicretization steps in link estimate its place on the grid
         for i in range(disc + 1):
@@ -147,37 +147,118 @@ class Merge:
     Nothing
     """
 
-    def __init__(self, da_rad, da_cml, grid_location_radar, min_obs):
+    def __init__(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        grid_location_radar="center",
+        min_obs=5,
+    ):
         # Check that both time dimensions are similar
         if not (da_cml.time == da_rad.time).all():
             raise ValueError
 
-        # The dataframes are just referenced, not stored twice
-        self.da_cml = da_cml
+        # Check that there is radar or gauge data
+        if (da_cml is None) and (da_gauge is None):
+            raise ValueError
+
+        # If CML data is present, compute radar rainfall along line
+        if da_cml is not None:
+            # Turn into dataset
+            da_cml = da_cml.to_dataset(name="obs")
+
+            # Calculate intersect weights
+            intersect_weights = (
+                plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+                    x1_line=da_cml.site_0_lon.data,
+                    y1_line=da_cml.site_0_lat.data,
+                    x2_line=da_cml.site_1_lon.data,
+                    y2_line=da_cml.site_1_lat.data,
+                    cml_id=da_cml.cml_id.data,
+                    x_grid=da_rad.lon.data,
+                    y_grid=da_rad.lat.data,
+                    grid_point_location=grid_location_radar,
+                )
+            )
+
+            # Calculate radar ranfall along CMLs
+            da_cml["radar"] = plg.spatial.get_grid_time_series_at_intersections(
+                grid_data=da_rad,
+                intersect_weights=intersect_weights,
+            )
+
+            # Set x and y coordinates of the CML to imitate a rain gauge, this
+            # is used in code where the midpoint of the CML is used.
+            da_cml = da_cml.assign_coords(
+                x=("cml_id", (da_cml.site_0_x.data + da_cml.site_1_x.data) / 2)
+            )
+            da_cml = da_cml.assign_coords(
+                y=("cml_id", (da_cml.site_0_y.data + da_cml.site_1_y.data) / 2)
+            )
+
+            # Add sensor type metadata
+            da_cml = da_cml.assign_coords(
+                sensor_type=("cml_id", np.tile("cml", da_cml.cml_id.size))
+            )
+
+            # Rename observation coordinate to obs_id
+            da_cml = da_cml.rename({"cml_id": "obs_id"})
+
+        # If gauge data is present, compute radar rainfall at point
+        if da_gauge is not None:
+            # Turn into dataset
+            da_gauge = da_gauge.to_dataset(name="obs")
+
+            get_grid_at_points = plg.spatial.GridAtPoints(
+                da_gridded_data=da_rad,
+                da_point_data=da_gauge,
+                nnear=1,
+                stat="best",
+            )
+
+            da_gauge["radar"] = get_grid_at_points(
+                da_gridded_data=da_rad,
+                da_point_data=da_gauge,
+            )
+
+            # Set x and y coordinates of the raingauge to imitate a CML, this
+            # is used in the block kriging code.
+            da_gauge = da_gauge.assign_coords(site_0_x=("id", da_gauge.x))
+            da_gauge = da_gauge.assign_coords(site_1_x=("id", da_gauge.x))
+            da_gauge = da_gauge.assign_coords(site_0_y=("id", da_gauge.y))
+            da_gauge = da_gauge.assign_coords(site_1_y=("id", da_gauge.y))
+
+            # Add sensor type metadata
+            da_gauge = da_gauge.assign_coords(
+                sensor_type=("cml_id", np.tile("gauge", da_gauge.id.size))
+            )
+
+            # Rename observation coordinate to obs_id
+            da_gauge = da_gauge.rename({"id": "obs_id"})
+
+        # CML and radar data present
+        if (da_gauge is not None) and (da_cml is not None):
+            da_cml, da_gauge = xr.align(da_cml, da_gauge, join="inner")
+            self.ds_obs = xr.merge([da_cml, da_gauge])
+
+        # CML present, but not gauge
+        elif (da_gauge is None) and (da_cml is not None):
+            self.ds_obs = da_cml
+
+        # CML not present, gauge is
+        elif (da_gauge is not None) and (da_cml is None):
+            self.ds_obs = da_gauge
+
+        # This exception should not be raised
+        else:
+            raise ValueError
+
+        # Store radar
         self.da_rad = da_rad
 
         # Stor hyperparameters
         self.min_obs_ = min_obs
-
-        # Check that CMLs are inside radar grid?
-
-        # Calculate intersect weights
-        intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-            x1_line=da_cml.site_0_lon.data,
-            y1_line=da_cml.site_0_lat.data,
-            x2_line=da_cml.site_1_lon.data,
-            y2_line=da_cml.site_1_lat.data,
-            cml_id=da_cml.cml_id.data,
-            x_grid=da_rad.lon.data,
-            y_grid=da_rad.lat.data,
-            grid_point_location=grid_location_radar,
-        )
-
-        # Calculate radar ranfall along CMLs
-        self.r_rad = plg.spatial.get_grid_time_series_at_intersections(
-            grid_data=da_rad,
-            intersect_weights=intersect_weights,
-        )
 
 
 class MergeAdditiveIDW(Merge):
@@ -208,23 +289,28 @@ class MergeAdditiveIDW(Merge):
     Nothing
     """
 
-    def __init__(self, da_rad, da_cml, grid_location_radar="center", min_obs=5):
-        Merge.__init__(self, da_rad, da_cml, grid_location_radar, min_obs)
+    def __init__(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        grid_location_radar="center",
+        min_obs=5,
+    ):
+        Merge.__init__(self, da_rad, da_cml, da_gauge, grid_location_radar, min_obs)
 
-        # Calculate the difference between radar and CML
+        # Calculate the difference between radar and CML for all timesteps
         self.r_diff = xr.where(
-            (self.r_rad > 0) & (self.da_cml > 0),
-            self.da_cml - self.r_rad,
+            self.ds_obs.radar > 0,
+            self.ds_obs.obs - self.ds_obs.radar,
             np.nan,
         )
 
-        self.r_diff["mid_x"] = (da_cml.site_0_x + da_cml.site_1_x) / 2
-        self.r_diff["mid_y"] = (da_cml.site_0_y + da_cml.site_1_y) / 2
-
+        # Store coordinates as columns
         self.x0 = np.hstack(
             [
-                self.r_diff.mid_y.data.reshape(-1, 1),
-                self.r_diff.mid_x.data.reshape(-1, 1),
+                self.r_diff.y.data.reshape(-1, 1),
+                self.r_diff.x.data.reshape(-1, 1),
             ]
         )
 
@@ -246,26 +332,28 @@ class MergeAdditiveIDW(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        # Select timestep
+        # Select timestep and get observations
         diff = self.r_diff.sel(time=time).data
 
-        # Keep cml obs if not nan and radar observes rainfall
-        keep = np.where(~np.isnan(diff) & (self.r_rad.sel(time=time) > 0))[0]
+        # Get index of not-nan obs
+        keep = np.where(~np.isnan(diff))[0]
 
-        diff = diff[keep]
-
-        # Check that we have enough observations
-        if diff.size > self.min_obs_:
+        # Check that that there is enough observations
+        if keep.size > self.min_obs_:
+            # Select radar timestep
             da_rad = self.da_rad.sel(time=time)
+
+            # Set zero cells to nan
             da_rad = xr.where(da_rad > 0, da_rad, np.nan)
 
             # do addtitive IDW merging
             adjusted_radar = merge_additive_idw(
                 da_rad,
-                diff,
+                diff[keep],
                 self.x0[keep, :],
             )
 
+            # Return adjusted where radar
             return xr.where(np.isnan(adjusted_radar), 0, adjusted_radar)
 
         # Else return the unadjusted radar
@@ -303,22 +391,30 @@ class MergeAdditiveBlockKriging(Merge):
     Nothing
     """
 
-    def __init__(self, da_rad, da_cml, grid_location_radar="center", min_obs=5, disc=9):
-        Merge.__init__(self, da_rad, da_cml, grid_location_radar, min_obs)
+    def __init__(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        grid_location_radar="center",
+        min_obs=5,
+        disc=9,
+    ):
+        Merge.__init__(self, da_rad, da_cml, da_gauge, grid_location_radar, min_obs)
 
-        # Calculate the difference between radar and CML
+        # Calculate the difference between radar and CML for all timesteps
         self.r_diff = xr.where(
-            (self.r_rad > 0) & (self.da_cml > 0),
-            self.da_cml - self.r_rad,
+            self.ds_obs.radar > 0,
+            self.ds_obs.obs - self.ds_obs.radar,
             np.nan,
         )
 
-        # Midpoint of CML, used for variogram fitting, assuming
+        # Midpoint of CML, used for variogram fitting
         x = (da_cml.site_0_x + da_cml.site_1_x) / 2
         y = (da_cml.site_0_y + da_cml.site_1_y) / 2
 
         # Calculate CML geometry
-        self.x0 = calculate_cml_geometry(da_cml, disc=disc)
+        self.x0 = calculate_cml_geometry(self.r_diff, disc=disc)
 
         # dictionary for storing kriging parameters and timestep
         kriging_param = {}
@@ -390,8 +486,10 @@ class MergeAdditiveBlockKriging(Merge):
 
         # If enough unique observations
         if np.unique(diff[keep]).size > self.min_obs_:
-            # Select timestep and mask 0 values
+            # Select radar timestep
             da_rad = self.da_rad.sel(time=time)
+
+            # Set zero cells to nan
             da_rad = xr.where(da_rad > 0, da_rad, np.nan)
 
             # Do additive merging using block kriging
@@ -441,14 +539,21 @@ class MergeBlockKrigingExternalDrift(Merge):
         DataArray with the same structure as the ds_rad but with the CML
         adjusted radar field.
 
-
     Returns
     -------
     Nothing
     """
 
-    def __init__(self, da_rad, da_cml, grid_location_radar="center", min_obs=5, disc=9):
-        Merge.__init__(self, da_rad, da_cml, grid_location_radar, min_obs)
+    def __init__(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        grid_location_radar="center",
+        min_obs=5,
+        disc=9,
+    ):
+        Merge.__init__(self, da_rad, da_cml, da_gauge, grid_location_radar, min_obs)
 
         # Only use CMLs where weather radar observes rainfall. This is done
         # because too many zeros makes it hard to work with the transformation
@@ -460,19 +565,21 @@ class MergeBlockKrigingExternalDrift(Merge):
         y = (da_cml.site_0_y + da_cml.site_1_y) / 2
 
         # Calculate CML geometry
-        self.x0 = calculate_cml_geometry(self.da_cml, disc=disc)
+        self.x0 = calculate_cml_geometry(self.ds_obs, disc=disc)
 
         # dictionary for storing kriging parameters and timestep
         kriging_param = {}
         transform_param = {}
 
         # Calculate kriging parameters for all timesteps
-        for time in self.da_cml.time.data:
+        for time in self.ds_obs.time.data:
             # Difference values for this timestep
-            values = self.da_cml.sel(time=time).data
+            values = self.ds_obs.sel(time=time).obs.data
 
             # Keep cml obs where radar observes rainfall
-            keep = np.where(~np.isnan(values) & (self.r_rad.sel(time=time) > 0))[0]
+            keep = np.where(~np.isnan(values) & (self.ds_obs.sel(time=time).radar > 0))[
+                0
+            ]
 
             # Unique values are needed in order to estimate the variogram
             if np.unique(values[keep]).size >= self.min_obs_:
@@ -542,8 +649,8 @@ class MergeBlockKrigingExternalDrift(Merge):
         scale = self.transform_param.loc[time.data]["scale"]
 
         # Select timestp
-        cml_obs = self.da_cml.sel(time=time).data
-        cml_rad = self.r_rad.sel(time=time).data
+        cml_obs = self.ds_obs.sel(time=time).obs.data
+        cml_rad = self.ds_obs.sel(time=time).radar.data
         da_rad = self.da_rad.sel(time=time)
 
         # Select stations where CML and radar is not nan
