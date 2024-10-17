@@ -41,9 +41,12 @@ ds_rad = xr.Dataset(
 
 
 def test_calculate_cml_geometry():
+    # Rename CML dim
+    ds_cmls_t = ds_cmls.rename({"cml_id": "obs_id"})
+
     # Test that the CML geometry is correctly esimtated
     y, x = merge.calculate_cml_geometry(
-        ds_cmls.isel(cml_id=[1]),
+        ds_cmls_t.isel(obs_id=[1]),
         disc=2,  # divides the line into two intervals, 3 points
     )[0]
     assert (y == np.array([-1, 0, 1])).all()
@@ -51,9 +54,12 @@ def test_calculate_cml_geometry():
 
 
 def test_block_points_to_lengths():
+    # Rename CML dim
+    ds_cmls_t = ds_cmls.rename({"cml_id": "obs_id"})
+
     # Check that the length matrix is correctly estimated
     line = merge.block_points_to_lengths(
-        merge.calculate_cml_geometry(ds_cmls.isel(cml_id=[0, 1]), disc=2)
+        merge.calculate_cml_geometry(ds_cmls_t.isel(obs_id=[0, 1]), disc=2)
     )
     l0l0 = line[0, 0]  # Lengths from link0 to link0
     l0l1 = line[0, 1]  # Lengths from link0 to link0
@@ -110,49 +116,55 @@ def test_block_points_to_lengths():
 
 
 def test_merge_additive_idw():
+    # Rename CML dim
+    ds_cmls_t = ds_cmls.rename({"cml_id": "obs_id"})
+
     # Calculate CML-radar difference
-    ds_cmls["R_diff"] = xr.full_like(ds_cmls.R, 0)
-    for cml_id in ds_cmls.cml_id:
+    ds_cmls_t["R_diff"] = xr.full_like(ds_cmls_t.R, 0)
+    for obs_id in ds_cmls_t.obs_id:
         rad_r = ds_rad.sel(
-            x=ds_cmls.sel(cml_id=cml_id).x,
-            y=ds_cmls.sel(cml_id=cml_id).y,
+            x=ds_cmls_t.sel(obs_id=obs_id).x,
+            y=ds_cmls_t.sel(obs_id=obs_id).y,
         ).R
-        cml_r = ds_cmls.sel(cml_id=cml_id).R
-        ds_cmls["R_diff"].loc[{"cml_id": cml_id}] = cml_r - rad_r
+        cml_r = ds_cmls_t.sel(obs_id=obs_id).R
+        ds_cmls_t["R_diff"].loc[{"obs_id": obs_id}] = cml_r - rad_r
 
     x0 = np.hstack(
         [
-            ds_cmls.y.data.reshape(-1, 1),
-            ds_cmls.x.data.reshape(-1, 1),
+            ds_cmls_t.y.data.reshape(-1, 1),
+            ds_cmls_t.x.data.reshape(-1, 1),
         ]
     )
     additive_idw = merge.merge_additive_idw(
-        ds_rad.R.isel(time=0), ds_cmls.R_diff.isel(time=0).data.ravel(), x0
+        ds_rad.R.isel(time=0), ds_cmls_t.R_diff.isel(time=0).data.ravel(), x0
     )
 
     # Check that radar is conditioned to point observations
-    for cml_id in ds_cmls.cml_id:
+    for obs_id in ds_cmls_t.obs_id:
         merge_r = additive_idw.sel(
-            x=ds_cmls.sel(cml_id=cml_id).x,
-            y=ds_cmls.sel(cml_id=cml_id).y,
+            x=ds_cmls_t.sel(obs_id=obs_id).x,
+            y=ds_cmls_t.sel(obs_id=obs_id).y,
         ).data
-        cml_r = ds_cmls.sel(cml_id=cml_id).isel(time=0).R.data
+        cml_r = ds_cmls_t.sel(obs_id=obs_id).isel(time=0).R.data
         assert cml_r == merge_r
 
 
 def test_merge_additive_blockkriging():
+    # Rename CML dim
+    ds_cmls_t = ds_cmls.rename({"cml_id": "obs_id"})
+
     # Calculate CML-radar difference
-    ds_cmls["R_diff"] = xr.full_like(ds_cmls.R, 0)
-    for cml_id in ds_cmls.cml_id:
+    ds_cmls_t["R_diff"] = xr.full_like(ds_cmls_t.R, 0)
+    for obs_id in ds_cmls_t.obs_id:
         rad_r = ds_rad.sel(
-            x=ds_cmls.sel(cml_id=cml_id).x,
-            y=ds_cmls.sel(cml_id=cml_id).y,
+            x=ds_cmls_t.sel(obs_id=obs_id).x,
+            y=ds_cmls_t.sel(obs_id=obs_id).y,
         ).R
-        cml_r = ds_cmls.sel(cml_id=cml_id).R
-        ds_cmls["R_diff"].loc[{"cml_id": cml_id}] = cml_r - rad_r
+        cml_r = ds_cmls_t.sel(obs_id=obs_id).R
+        ds_cmls_t["R_diff"].loc[{"obs_id": obs_id}] = cml_r - rad_r
 
     # Calculate CML geometry
-    x0 = merge.calculate_cml_geometry(ds_cmls)
+    x0 = merge.calculate_cml_geometry(ds_cmls_t)
 
     # Define variogram (exponential)
     def variogram(h):  # Exponential variogram
@@ -161,7 +173,7 @@ def test_merge_additive_blockkriging():
     # do additive blockkriging
     additive_blockkriging = merge.merge_additive_blockkriging(
         ds_rad.R.isel(time=0),
-        ds_cmls.R_diff.isel(time=0).data,
+        ds_cmls_t.R_diff.isel(time=0).data,
         x0,
         variogram,
     )
@@ -181,18 +193,21 @@ def test_merge_additive_blockkriging():
 
 
 def test_merge_ked_blockkriging():
+    # Rename CML dim
+    ds_cmls_t = ds_cmls.rename({"cml_id": "obs_id"})
+
     # Calculate CML-radar difference
-    ds_cmls["cml_rad"] = xr.full_like(ds_cmls.R, 0)
-    for cml_id in ds_cmls.cml_id:
+    ds_cmls_t["cml_rad"] = xr.full_like(ds_cmls_t.R, 0)
+    for obs_id in ds_cmls_t.obs_id:
         rad_r = ds_rad.sel(
-            x=ds_cmls.sel(cml_id=cml_id).x,
-            y=ds_cmls.sel(cml_id=cml_id).y,
+            x=ds_cmls_t.sel(obs_id=obs_id).x,
+            y=ds_cmls_t.sel(obs_id=obs_id).y,
         ).R
 
-        ds_cmls["cml_rad"].loc[{"cml_id": cml_id}] = rad_r
+        ds_cmls_t["cml_rad"].loc[{"obs_id": obs_id}] = rad_r
 
     # Calculate CML geometry
-    x0 = merge.calculate_cml_geometry(ds_cmls)
+    x0 = merge.calculate_cml_geometry(ds_cmls_t)
 
     # Define variogram (exponential)
     def variogram(h):  # Exponential variogram
@@ -201,8 +216,8 @@ def test_merge_ked_blockkriging():
     # do additive blockkriging
     ked = merge.merge_ked_blockkriging(
         ds_rad.R.isel(time=0),
-        ds_cmls.cml_rad.isel(time=0).data,
-        ds_cmls.R.isel(time=0).data,
+        ds_cmls_t.cml_rad.isel(time=0).data,
+        ds_cmls_t.R.isel(time=0).data,
         x0,
         variogram,
     )
