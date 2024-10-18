@@ -87,12 +87,12 @@ def calculate_cml_geometry(ds_cmls, discretization=8):
     ds_cmls: xarray.Dataset
         CML geometry as a xarray object. Must contain the coordinates
         (site_0_x, site_0_y, site_1_x site_1_y)
-    disc: int
-discretization        Number of intervals to discretize lines into.
+    discretization: int
+        Number of intervals to discretize lines into.
 
     Returns
     -------
-    x0: np.array
+    x0: xr.DataArray
         Array with coordinates for all CMLs. The array is organized into a 3D
         matrix with the following structure:
             (number of n CMLs [0, ..., n],
@@ -117,8 +117,42 @@ discretization        Number of intervals to discretize lines into.
             ypos[block_i, i] = y_a + (i / discretization) * (y_b - y_a)
 
     # Store x and y coordinates in the same array (n_cmls, y/x, discretization)
-    return np.array([ypos, xpos]).transpose([1, 0, 2])
+    x0_cml = np.array([ypos, xpos]).transpose([1, 0, 2])
+    
+    # Turn into xarray dataarray and return
+    return xr.DataArray(x0_cml, coords={
+        'cml_id': ds_cmls.cml_id.data,
+        'yx': ['y', 'x'],
+        'discretization': np.arange(discretization+1),
+    })
 
+def calculate_cml_midpoint(da_cml):
+    # CML midpoint coordinates as columns
+    x = ((da_cml.site_0_x + da_cml.site_1_x) / 2).data
+    y = ((da_cml.site_0_y + da_cml.site_1_y) / 2).data
+    
+    # CML midpoint coordinates as columns
+    x0_cml = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+    
+    # Create dataarray and return
+    return xr.DataArray(x0_cml, coords={
+        'cml_id': da_cml.cml_id.data,
+        'yx': ['y', 'x'],
+    })
+
+def calculate_gauge_midpoint(da_gauge):
+    # Gauge coordinates as columns
+    x0_gauge = np.hstack([
+            da_gauge.y.data.reshape(-1, 1),
+            da_gauge.x.data.reshape(-1, 1),
+        ]
+    )
+    
+    # Create dataarray return
+    return xr.DataArray(x0_gauge, coords={
+        'id': da_gauge.id.data,
+        'yx': ['y', 'x'],
+    })
 
 class Merge:
     """Common code for all merging methods.
@@ -145,13 +179,15 @@ class Merge:
         # Location of grid point for weather radar, used in intersect weights
         self.grid_point_location = grid_point_location
         
-        # Init weights CML 
+        # Init weights CML and names
         self.intersect_weights = None        
         
         # Init gauge possitions and names
         self.get_grid_at_points = None
-        self.gauge_id = None
         
+        # Init coordinates for gauge and CML
+        self.x0_gauge = None
+        self.x0_cml = None
         
     def update_(self, da_rad, da_cml = None, da_gauge = None):
         # 
@@ -159,10 +195,11 @@ class Merge:
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
             raise ValueError('Please provide cml or gauge data')
-            
+        
+        # If CML is present
         if da_cml is not None:
             # If intersect weights not computed, compute all weights
-            if self.intersect_weights is None:
+            if self.x0_cml is None:
                 self.intersect_weights = (
                     plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
                         x1_line=da_cml.site_0_lon.data,
@@ -176,6 +213,9 @@ class Merge:
                     )
                 )
                 
+                # Calculate CML midpoints
+                self.x0_cml = calculate_cml_midpoint(da_cml)
+                   
             else: 
                 # New cml names
                 cml_id_new = np.sort(da_cml.cml_id.data)
@@ -188,16 +228,19 @@ class Merge:
                     # Identify cml_id that is in the new and old array
                     cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
                     
-                    # Strip the stored intersect weights, keeping only new ones
+                    # Slice the stored intersect weights, keeping only new ones
                     self.intersect_weights = self.intersect_weights.sel(
                         cml_id = cml_id_keep
                         )
                     
+                    # Slice stored CML midpoints, keeping only new ones
+                    self.x0_cml = self.x0_cml(cml_id = cml_id_keep)
+                    
                     # Identify cml_id not in the new
-                    missing_in_old = np.setdiff1d(cml_id_new, cml_id_old)
+                    cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
                     
                     # Slice da_cml to get only missing coords
-                    da_cml_add = da_cml.sel(cml_id = missing_in_old)
+                    da_cml_add = da_cml.sel(cml_id = cml_id_not_in_old)
                     
                     # Interect weights of CMLs to add
                     intersect_weights_add = (                
@@ -216,12 +259,25 @@ class Merge:
                     # Add new intersect weights
                     self.intersect_weights = xr.concat(
                         [self.intersect_weights, intersect_weights_add], 
-                        dim='cml_id')
-
+                        dim='cml_id'
+                    )
+                    
+                    # Calculate CML midpoint for new CMLs 
+                    x0_cml_add = calculate_cml_midpoint(da_cml_add)
+                    
+                    # Add to existing x0
+                    self.x0_cml = xr.concat(
+                        [self.x0_cml, x0_cml_add], 
+                        dim='cml_id'
+                    )
+                    
+            # Sort x0_cml so it follows the same order as da_cml  
+            self.x0_cml = self.x0_cml.sel(cml_id = da_cml.cml_id.data)
+        
         # If gauge data is present
         if da_gauge is not None:
             # If this is the first update
-            if self.get_grid_at_points is None:
+            if self.x0_gauge is None:
                 # Calculate gridpoints for gauges
                 self.get_grid_at_points = plg.spatial.GridAtPoints(
                     da_gridded_data=da_rad,
@@ -229,14 +285,16 @@ class Merge:
                     nnear=1,
                     stat="best",
                 )
+                
+                # Calculate gauge coordinates
+                self.x0_gauge = calculate_gauge_midpoint(da_gauge)
             
             else:
-                
                 # Get names of new gauges
                 gauge_id_new = da_gauge.id.data
                 
                 # Get names of gauges in previous update
-                gauge_id_old = self.gauge_id
+                gauge_id_old = self.x0_gauge.id.data
                 
                 # Check that equal, element order is important
                 if not np.array_equal(gauge_id_new, gauge_id_old):
@@ -248,8 +306,152 @@ class Merge:
                         stat="best",
                     )
                     
-                    # Store new gauge names
-                    self.gauge_id = da_gauge.id.data
+                # Calculate gauge coordinates
+                self.x0_gauge = calculate_gauge_midpoint(da_gauge)
+                
+            # Sort x0_gauge so it follows the same order as da_gauge  
+            self.x0_gauge = self.x0_gauge.sel(id = da_gauge.id.data)
+                
+    def update_block_(self, da_rad, da_cml = None, da_gauge = None):
+        # 
+        
+        # Check that there is radar or gauge data, if not raise an error
+        if (da_cml is None) and (da_gauge is None):
+            raise ValueError('Please provide cml or gauge data')
+        
+        # If CML is present
+        if da_cml is not None:
+            # If intersect weights not computed, compute all weights
+            if self.intersect_weights is None:
+                self.intersect_weights = (
+                    plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+                        x1_line=da_cml.site_0_lon.data,
+                        y1_line=da_cml.site_0_lat.data,
+                        x2_line=da_cml.site_1_lon.data,
+                        y2_line=da_cml.site_1_lat.data,
+                        cml_id=da_cml.cml_id.data,
+                        x_grid=da_rad.lon.data,
+                        y_grid=da_rad.lat.data,
+                        grid_point_location=self.grid_point_location,
+                    )
+                )
+                                
+                # CML coordinates along all links
+                self.x0_cml = calculate_cml_geometry(
+                    da_cml, 
+                    discretization=self.discretization
+                )                
+                   
+            else: 
+                # New cml names
+                cml_id_new = np.sort(da_cml.cml_id.data)
+                
+                # cml names of previous update
+                cml_id_old = np.sort(self.intersect_weights.cml_id.data)
+        
+                # If new CML coord is present or old CML coord is removed
+                if not np.array_equal(cml_id_new, cml_id_old):
+                    # Identify cml_id that is in the new and old array
+                    cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
+                    
+                    # Slice the stored intersect weights, keeping only new ones
+                    self.intersect_weights = self.intersect_weights.sel(
+                        cml_id = cml_id_keep
+                        )
+                    
+                    # Slice stored CML midpoints, keeping only new ones
+                    self.x0_cml = self.x0_cml(cml_id = cml_id_keep)
+                    
+                    # Identify cml_id not in the new
+                    cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
+                    
+                    # Slice da_cml to get only missing coords
+                    da_cml_add = da_cml.sel(cml_id = cml_id_not_in_old)
+                    
+                    # Interect weights of CMLs to add
+                    intersect_weights_add = (                
+                        plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+                            x1_line=da_cml_add.site_0_lon.data,
+                            y1_line=da_cml_add.site_0_lat.data,
+                            x2_line=da_cml_add.site_1_lon.data,
+                            y2_line=da_cml_add.site_1_lat.data,
+                            cml_id=da_cml_add.cml_id.data,
+                            x_grid=da_rad.lon.data,
+                            y_grid=da_rad.lat.data,
+                            grid_point_location=self.grid_point_location,
+                        )
+                    )
+                     
+                    # Add new intersect weights
+                    self.intersect_weights = xr.concat(
+                        [self.intersect_weights, intersect_weights_add], 
+                        dim='cml_id'
+                    )
+                    
+                    # Calculate CML geometry for new links
+                    x0_cml_add = calculate_cml_geometry(
+                        da_cml_add, 
+                        discretization=self.discretization
+                    )     
+                    
+                    # Add new x0 to self.x0_cml
+                    self.x0_cml = xr.concat(
+                        [self.x0_cml, x0_cml_add], 
+                        dim='cml_id'
+                    )
+                    
+            # Sort x0_cml so it follows the same order as da_cml
+            self.x0_cml = self.x0_cml.sel(cml_id = da_cml.cml_id.data)
+                                        
+        # If gauge data is present
+        if da_gauge is not None:
+            # If this is the first update
+            if self.x0_gauge is None:
+                # Calculate gridpoints for gauges
+                self.get_grid_at_points = plg.spatial.GridAtPoints(
+                    da_gridded_data=da_rad,
+                    da_point_data=da_gauge,
+                    nnear=1,
+                    stat="best",
+                )
+                
+                # Calculate gauge coordinates
+                x0_gauge = calculate_gauge_midpoint(da_gauge)
+                
+                # Repeat the same coordinates so that the array gets the same 
+                # shape as x0_cml, used for block kriging
+                self.x0_gauge = x0_gauge.expand_dims(
+                    disc=range(self.discretization+1)
+                ).transpose('id', 'yx', 'disc')
+            
+            else:
+                # Get names of new gauges
+                gauge_id_new = da_gauge.id.data
+                
+                # Get names of gauges in previous update
+                gauge_id_old = self.x0_gauge.id.data
+                
+                # Check that equal, element order is important
+                if not np.array_equal(gauge_id_new, gauge_id_old):
+                    # Calculate new gauge possitions
+                    self.get_grid_at_points = plg.spatial.GridAtPoints(
+                        da_gridded_data=da_rad,
+                        da_point_data=da_gauge,
+                        nnear=1,
+                        stat="best",
+                    )
+                    
+                    # Calculate gauge coordinates
+                    x0_gauge = calculate_gauge_midpoint(da_gauge)
+                    
+                    # As the gauge is just a point, repeat the gauge coord 
+                    self.x0_gauge = x0_gauge.expand_dims(
+                        disc=range(self.discretization+1)
+                    ).transpose('id', 'yx', 'disc')
+            
+            # Sort x0_gauge so it follows the same order as da_gauge  
+            self.x0_gauge = self.x0_gauge.sel(id = da_gauge.id.data)
+                    
                     
     def radar_at_ground_(self, da_rad, da_cml=None, da_gauge=None):
         """Evaluate radar at cml and rain gauge ground possitions
@@ -296,7 +498,8 @@ class Merge:
                 [da_cml.data.ravel(), da_gauge.data.ravel()]
             )
             
-            x0 = np.vstack([self.x0_cml, self.x0_gauge])
+            # get x0
+            x0 = np.vstack([self.x0_cml.data, self.x0_gauge.data])
                         
         # When only CML
         elif (da_cml is not None):
@@ -315,7 +518,8 @@ class Merge:
             # Store cml data
             observations_ground = da_cml.data.ravel()
             
-            x0 = self.x0_cml
+            # get x0
+            x0 = self.x0_cml.data
         
         # When only gauge
         elif (da_gauge is not None):      
@@ -332,9 +536,10 @@ class Merge:
             # Store gauge data
             observations_ground = da_gauge.data.ravel()
             
-            x0 = self.x0_gauge
+            # get x0
+            x0 = self.x0_gauge.data
             
-        # Return radar at ground observations and corresponding 
+        # Return radar at ground observations and corresponding x0
         return observations_radar, observations_ground, x0
 
 
@@ -376,22 +581,6 @@ class MergeAdditiveIDW(Merge):
     def update(self, da_rad, da_cml=None, da_gauge=None):
         # Update cml and gauge weights used for getting radar data
         self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        
-        if da_cml is not None:
-            # Calculate CML midpoints
-            x = ((da_cml.site_0_x + da_cml.site_1_x) / 2).data
-            y = ((da_cml.site_0_y + da_cml.site_1_y) / 2).data
-            
-            # Store cml coordinates as columns
-            self.x0_cml = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-        
-        if da_gauge is not None:
-            # Store gauge coordinates as columns
-            self.x0_gauge = np.hstack([
-                    da_gauge.y.data.reshape(-1, 1),
-                    da_gauge.x.data.reshape(-1, 1),
-                ]
-            )
     
     def adjust(self, da_rad, da_cml=None, da_gauge=None):
         """Adjust radar field for one time step.
@@ -496,32 +685,7 @@ class MergeAdditiveBlockKriging(Merge):
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         # Update cml and gauge weights used for getting radar data
-        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        
-        if da_cml is not None:
-            # Store cml coordinates as columns
-            self.x0_cml = calculate_cml_geometry(
-                da_cml, 
-                discretization=self.discretization
-            )
-            
-        if da_gauge is not None:
-            # Make da_gauge imitate CML coordinates, treating the point as a line
-            gauge = da_gauge.coords.copy()
-            gauge = gauge.assign_coords(site_0_x=("id", gauge.x.data))
-            gauge = gauge.assign_coords(site_1_x=("id", gauge.x.data))
-            gauge = gauge.assign_coords(site_0_y=("id", gauge.y.data))
-            gauge = gauge.assign_coords(site_1_y=("id", gauge.y.data))
-
-
-            # Rename observation coordinate to obs_id
-            gauge = gauge.rename({"id": "obs_id"})
-            
-            # Store gauge coordinates on cml coordinate form
-            self.x0_gauge = calculate_cml_geometry(
-                self.da_cml, 
-                discretization=self.discretization
-            )
+        self.update_block_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
     
     def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram=None):
         """Adjust radar field for one time step.
@@ -567,7 +731,7 @@ class MergeAdditiveBlockKriging(Merge):
             da_rad_t = da_rad.sel(time=time)
 
             # do addtitive IDW merging
-            adjusted = merge_additive_idw(
+            adjusted = merge_additive_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan), # function skips nan
                 diff[keep],
                 x0[keep, :],
@@ -635,32 +799,7 @@ class MergeBlockKrigingExternalDrift(Merge):
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         # Update cml and gauge weights used for getting radar data
-        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        
-        if da_cml is not None:
-            # Store cml coordinates as columns
-            self.x0_cml = calculate_cml_geometry(
-                da_cml, 
-                discretization=self.discretization
-            )
-            
-        if da_gauge is not None:
-            # Make da_gauge imitate CML coordinates, treating the point as a line
-            gauge = da_gauge.coords.copy()
-            gauge = gauge.assign_coords(site_0_x=("id", gauge.x.data))
-            gauge = gauge.assign_coords(site_1_x=("id", gauge.x.data))
-            gauge = gauge.assign_coords(site_0_y=("id", gauge.y.data))
-            gauge = gauge.assign_coords(site_1_y=("id", gauge.y.data))
-
-
-            # Rename observation coordinate to obs_id
-            gauge = gauge.rename({"id": "obs_id"})
-            
-            # Store gauge coordinates on cml coordinate form
-            self.x0_gauge = calculate_cml_geometry(
-                self.da_cml, 
-                discretization=self.discretization
-            )
+        self.update_block_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
     
     def adjust(
             self, 
