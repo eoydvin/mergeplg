@@ -71,11 +71,11 @@ def block_points_to_lengths(x0):
     )
 
 
-def calculate_cml_geometry(ds_cmls, disc=8):
+def calculate_cml_geometry(ds_cmls, discretization=8):
     """Calculate the position of points along CMLs.
 
     Calculates the discretized CML geometry by dividing the CMLs into
-    disc-number of intervals. The ds_cmls xarray object must contain the
+    discretization-number of intervals. The ds_cmls xarray object must contain the
     projected coordinates (site_0_x, site_0_y, site_1_x site_1_y) defining
     the start and end point of the CML. If no such projection is available
     the user can, as an approximation, rename the lat/lon coordinates so that
@@ -88,7 +88,7 @@ def calculate_cml_geometry(ds_cmls, disc=8):
         CML geometry as a xarray object. Must contain the coordinates
         (site_0_x, site_0_y, site_1_x site_1_y)
     disc: int
-        Number of intervals to discretize lines into.
+discretization        Number of intervals to discretize lines into.
 
     Returns
     -------
@@ -97,26 +97,26 @@ def calculate_cml_geometry(ds_cmls, disc=8):
         matrix with the following structure:
             (number of n CMLs [0, ..., n],
              y/x-cooridnate [0(y), 1(x)],
-             interval [0, ..., disc])
+             interval [0, ..., discretization])
 
     """
     # Calculate discretized positions along the lines, store in numy array
-    xpos = np.zeros([ds_cmls.obs_id.size, disc + 1])  # shape (line, position)
-    ypos = np.zeros([ds_cmls.obs_id.size, disc + 1])
+    xpos = np.zeros([ds_cmls.cml_id.size, discretization + 1])  # shape (line, position)
+    ypos = np.zeros([ds_cmls.cml_id.size, discretization + 1])
 
     # For all CMLs
-    for block_i, obs_id in enumerate(ds_cmls.obs_id):
-        x_a = ds_cmls.sel(obs_id=obs_id).site_0_x.data
-        y_a = ds_cmls.sel(obs_id=obs_id).site_0_y.data
-        x_b = ds_cmls.sel(obs_id=obs_id).site_1_x.data
-        y_b = ds_cmls.sel(obs_id=obs_id).site_1_y.data
+    for block_i, cml_id in enumerate(ds_cmls.cml_id):
+        x_a = ds_cmls.sel(cml_id=cml_id).site_0_x.data
+        y_a = ds_cmls.sel(cml_id=cml_id).site_0_y.data
+        x_b = ds_cmls.sel(cml_id=cml_id).site_1_x.data
+        y_b = ds_cmls.sel(cml_id=cml_id).site_1_y.data
 
         # for all dicretization steps in link estimate its place on the grid
-        for i in range(disc + 1):
-            xpos[block_i, i] = x_a + (i / disc) * (x_b - x_a)
-            ypos[block_i, i] = y_a + (i / disc) * (y_b - y_a)
+        for i in range(discretization + 1):
+            xpos[block_i, i] = x_a + (i / discretization) * (x_b - x_a)
+            ypos[block_i, i] = y_a + (i / discretization) * (y_b - y_a)
 
-    # Store x and y coordinates in the same array (n_cmls, y/x, disc)
+    # Store x and y coordinates in the same array (n_cmls, y/x, discretization)
     return np.array([ypos, xpos]).transpose([1, 0, 2])
 
 
@@ -250,6 +250,86 @@ class Merge:
                     
                     # Store new gauge names
                     self.gauge_id = da_gauge.id.data
+                    
+    def radar_at_ground_(self, da_rad, da_cml=None, da_gauge=None):
+        """Evaluate radar at cml and rain gauge ground possitions
+
+        Evaluates weather radar along cml and at rain gauge possitions. 
+
+        Parameters
+        ----------
+        da_rad : xarray.DataArray
+            DataArray with radar data. 
+
+        Returns
+        -------
+        da_rad_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the CML
+            adjusted radar field.
+        """
+
+        # When CML and gauge
+        if (da_cml is not None) and (da_gauge is not None):
+            # Check that we have selected only one timestep
+            assert da_rad.time.size == 1, "Select only one time step"
+            assert da_cml.time.size == 1, "Select only one time step"
+            assert da_gauge.time.size == 1, "Select only one time step"
+            
+            rad_cml = (
+                plg.spatial.get_grid_time_series_at_intersections(
+                    grid_data=da_rad,
+                    intersect_weights=self.intersect_weights,
+                )
+            ).data.ravel()
+            
+            # Estimate radar at gauges
+            rad_gauge = self.get_grid_at_points(
+                da_gridded_data=da_rad,
+                da_point_data=da_gauge,  
+            ).data.ravel()
+            
+            # Stack radar observations at cml and gauge in correct order
+            observations_radar = np.concatenate([rad_cml, rad_gauge])
+            
+            # Stack instrument observations at cml and gauge in correct order
+            observations_ground = np.concatenate(
+                [da_cml.data.ravel(), da_gauge.data.ravel()]
+            )
+                        
+        # When only CML
+        elif (da_cml is not None):
+            # Check that we have selected only one timestep
+            assert da_rad.time.size == 1, "Select only one time step"
+            assert da_cml.time.size == 1, "Select only one time step"
+            
+            # Estimate radar at cml
+            observations_radar = (
+                plg.spatial.get_grid_time_series_at_intersections(
+                    grid_data=da_rad,
+                    intersect_weights=self.intersect_weights,
+                )
+            ).data.ravel()
+            
+            # Store cml data
+            observations_ground = da_cml.data.ravel()
+        
+        # When only gauge
+        elif (da_gauge is not None):      
+            # Check that we have selected only one timestep
+            assert da_rad.time.size == 1, "Select only one time step"
+            assert da_gauge.time.size == 1, "Select only one time step"
+            
+            # Estimate radar at gauges
+            observations_radar = self.get_grid_at_points(
+                da_gridded_data=da_rad,
+                da_point_data=da_gauge,  
+            ).data.ravel()
+            
+            # Store gauge data
+            observations_ground = da_gauge.data.ravel()
+            
+        # Return radar at ground observations and corresponding 
+        return observations_radar, observations_ground
 
 
 class MergeAdditiveIDW(Merge):
@@ -282,40 +362,41 @@ class MergeAdditiveIDW(Merge):
 
     def __init__(
         self,
-        da_rad,
-        da_cml=None,
-        da_gauge=None,
         grid_location_radar="center",
         min_obs=5,
     ):
-        Merge.__init__(self, da_rad, da_cml, da_gauge, grid_location_radar, min_obs)
+        Merge.__init__(self, grid_location_radar, min_obs)
 
-        # Calculate the difference between radar and CML for all timesteps
-        self.r_diff = xr.where(
-            self.ds_obs.radar > 0,
-            self.ds_obs.obs - self.ds_obs.radar,
-            np.nan,
-        )
-
-        # Store coordinates as columns
-        self.x0 = np.hstack(
-            [
-                self.r_diff.y.data.reshape(-1, 1),
-                self.r_diff.x.data.reshape(-1, 1),
-            ]
-        )
-
-    def __call__(self, time):
-        """Adjust radar field.
+    def update(self, da_rad, da_cml=None, da_gauge=None):
+        # Update cml and gauge weights used for getting radar data
+        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        
+        if da_cml is not None:
+            # Calculate CML midpoints
+            x = ((da_cml.site_0_x + da_cml.site_1_x) / 2).data
+            y = ((da_cml.site_0_y + da_cml.site_1_y) / 2).data
+            
+            # Store cml coordinates as columns
+            self.x0_cml = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+        
+        if da_gauge is not None:
+            # Store gauge coordinates as columns
+            self.x0_gauge = np.hstack([
+                    da_gauge.y.data.reshape(-1, 1),
+                    da_gauge.x.data.reshape(-1, 1),
+                ]
+            )
+    
+    def adjust(self, da_rad, da_cml=None, da_gauge=None):
+        """Adjust radar field for one time step.
 
         Evaluates if we have enough observations to adjust the radar field.
-        Then adjust radar field to observations using additive Block Kriging.
+        Then adjust radar field to observations using additive IDW.
 
         Parameters
         ----------
-        time : datetime
-            Timestep for doing adjustment. For instance select first timestep
-            using ds_cml.time[0].
+        da_rad : xarray.DataArray
+            DataArray with radar data. 
 
         Returns
         -------
@@ -323,32 +404,229 @@ class MergeAdditiveIDW(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        # Select timestep and get observations
-        diff = self.r_diff.sel(time=time).data
+
+        # When CML and gauge
+        if (da_cml is not None) and (da_gauge is not None):
+            # Evaluate radar at cml and gauge ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+                da_gauge=da_gauge
+            )
+            
+            # Stack coordinates for cml and gauge
+            x0 = np.vstack([self.x0_cml, self.x0_gauge])
+        
+        # When only CML
+        elif (da_cml is not None):
+            # Evaluate radar at cml ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+            )
+            
+            # Store cml coordinates
+            x0 = self.x0_cml
+        
+        # When only gauge
+        elif (da_gauge is not None):      
+            # Evaluate radar at gauge ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+                da_gauge=da_gauge
+            )
+            
+            # Store gauge coordinates
+            x0 = self.x0_gauge
+            
+        else:
+            raise ValueError('Please provide CML or gauge data')
+        
+        # Calculate radar-instrument difference if radar has observation
+        diff = np.where(rad > 0, obs - rad, np.nan)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(diff))[0]
 
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
-            # Select radar timestep
-            da_rad = self.da_rad.sel(time=time)
-
-            # Set zero cells to nan
-            da_rad = xr.where(da_rad > 0, da_rad, np.nan)
+            # get timestap
+            time = da_rad.time.data[0]
+            
+            # Remove radar time dimension
+            da_rad_t = da_rad.sel(time=time).copy() 
 
             # do addtitive IDW merging
-            adjusted_radar = merge_additive_idw(
-                da_rad,
+            adjusted = merge_additive_idw(
+                xr.where(da_rad_t > 0, da_rad_t, np.nan), # func skipps nan
                 diff[keep],
-                self.x0[keep, :],
+                x0[keep, :],
             )
-
-            # Return adjusted where radar
-            return xr.where(np.isnan(adjusted_radar), 0, adjusted_radar)
+            
+            # Replace nan with original radar data (so that da_rad nan is kept)
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+            
+            # Re-assign timestamp
+            adjusted = adjusted.assign_coords(time=time)
+            
+            return adjusted
 
         # Else return the unadjusted radar
-        return self.da_rad.sel(time=time)
+        return da_rad
+    
+    
+class MergeAdditiveBlockKriging(Merge):
+    """Merge CML and radar using an additive block kriging.
+
+    Marges the provided radar field in ds_rad to CML observations by
+    interpolating the difference between the CML and radar observations using
+    block kriging. This takes into account the full path integrated CML
+    rainfall rate. The variogram is calculated using a exponential model and
+    variogram parameters are automatically fit for each timestep using CML
+    observations.
+
+    Parameters
+    ----------
+    da_cml: xarray.DataArray
+        CML observations. Must contain the transformed coordinates site_0_x,
+        site_1_x, site_0_y and site_1_y.
+    ds_rad: xarray.DataArray
+        Gridded radar data. Must contain the x and y meshgrid given as xs
+        and ys.
+    grid_location_radar: str
+        String indicating the grid location of the radar. Used for calculating
+        the radar values along each CML.
+    min_obs: int
+        Minimum number of unique observations needed in order to do adjustment.
+    disc: int
+        Number of points to discretize the CML into.
+
+    Returns
+    -------
+    Nothing
+    """
+
+
+    def __init__(
+        self,
+        grid_location_radar="center",
+        min_obs=5,
+        discretization = 8,
+    ):
+        Merge.__init__(self, grid_location_radar, min_obs)
+        
+        # Number of discretization points along CML
+        self.discretization = discretization
+
+    def update(self, da_rad, da_cml=None, da_gauge=None):
+        # Update cml and gauge weights used for getting radar data
+        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        
+        if da_cml is not None:
+            # Store cml coordinates as columns
+            self.x0_cml = calculate_cml_geometry(
+                self.da_cml, 
+                discretization=self.discretization
+            )
+            
+        if da_gauge is not None:
+            # Make da_gauge imitate CML coordinates, treating the point as a line
+            da_gauge = 
+            
+            self.x0_gauge = np.hstack([
+                    da_gauge.y.data.reshape(-1, 1),
+                    da_gauge.x.data.reshape(-1, 1),
+                ]
+            )
+    
+    def adjust(self, da_rad, da_cml=None, da_gauge=None):
+        """Adjust radar field for one time step.
+
+        Evaluates if we have enough observations to adjust the radar field.
+        Then adjust radar field to observations using additive IDW.
+
+        Parameters
+        ----------
+        da_rad : xarray.DataArray
+            DataArray with radar data. 
+
+        Returns
+        -------
+        da_rad_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the CML
+            adjusted radar field.
+        """
+
+        # When CML and gauge
+        if (da_cml is not None) and (da_gauge is not None):
+            # Evaluate radar at cml and gauge ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+                da_gauge=da_gauge
+            )
+            
+            # Stack coordinates for cml and gauge
+            x0 = np.vstack([self.x0_cml, self.x0_gauge])
+        
+        # When only CML
+        elif (da_cml is not None):
+            # Evaluate radar at cml ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+            )
+            
+            # Store cml coordinates
+            x0 = self.x0_cml
+        
+        # When only gauge
+        elif (da_gauge is not None):      
+            # Evaluate radar at gauge ground positions
+            rad, obs = self.radar_at_ground_(
+                da_rad, 
+                da_cml=da_cml, 
+                da_gauge=da_gauge
+            )
+            
+            # Store gauge coordinates
+            x0 = self.x0_gauge
+        
+        else:
+            raise ValueError('Please provide CML or gauge data')
+        
+        # Calculate radar-instrument difference if radar has observation
+        diff = np.where(rad > 0, obs - rad, np.nan)
+
+        # Get index of not-nan obs
+        keep = np.where(~np.isnan(diff))[0]
+
+        # Check that that there is enough observations
+        if keep.size > self.min_obs_:
+            # get timestap
+            time = da_rad.time.data[0]
+            
+            # Remove radar time dimension
+            da_rad_t = da_rad.sel(time=time).copy() 
+
+            # do addtitive IDW merging
+            adjusted = merge_additive_idw(
+                xr.where(da_rad_t > 0, da_rad_t, np.nan), # func skipps nan
+                diff[keep],
+                x0[keep, :],
+            )
+            
+            # Replace nan with original radar data (so that da_rad nan is kept)
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+            
+            # Re-assign timestamp
+            adjusted = adjusted.assign_coords(time=time)
+            
+            return adjusted
+
+        # Else return the unadjusted radar
+        return da_rad
 
 
 class MergeAdditiveBlockKriging(Merge):
