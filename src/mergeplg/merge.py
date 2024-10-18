@@ -120,6 +120,10 @@ def calculate_cml_geometry(ds_cmls, disc=8):
     return np.array([ypos, xpos]).transpose([1, 0, 2])
 
 
+
+test
+
+
 class Merge:
     """Common code for all merging methods.
 
@@ -155,10 +159,9 @@ class Merge:
         grid_location_radar="center",
         min_obs=5,
     ):
-
-        # Check that there is radar or gauge data
+        # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
-            raise ValueError
+            raise ValueError('Please provide cml or gauge data')
 
         # If CML data is present, compute radar rainfall along line
         if da_cml is not None:
@@ -207,20 +210,23 @@ class Merge:
             # Turn into dataset
             da_gauge = da_gauge.to_dataset(name="obs")
 
+            # Calculate gridpoints for gauges
             get_grid_at_points = plg.spatial.GridAtPoints(
                 da_gridded_data=da_rad,
                 da_point_data=da_gauge,
                 nnear=1,
                 stat="best",
             )
-
+            
+            # Calculate radar rainfall at gauge possitions
             da_gauge["radar"] = get_grid_at_points(
                 da_gridded_data=da_rad,
                 da_point_data=da_gauge.obs,
             )
 
             # Set x and y coordinates of the raingauge to imitate a CML, this
-            # is used in the block kriging code.
+            # is used in the block kriging code where points are treated as 
+            # lines. 
             da_gauge = da_gauge.assign_coords(site_0_x=("id", da_gauge.x.data))
             da_gauge = da_gauge.assign_coords(site_1_x=("id", da_gauge.x.data))
             da_gauge = da_gauge.assign_coords(site_0_y=("id", da_gauge.y.data))
@@ -236,34 +242,39 @@ class Merge:
 
         # CML and radar data present
         if (da_gauge is not None) and (da_cml is not None):
-            # Check that all time dimensions are similar
+            
+            # Check that all time dimensions are the same
             if not (da_cml.time == da_rad.time).all():
-                raise ValueError
+                raise ValueError("""The time coordinates of the cml dataset
+                                 do not match the radar""")
+                                 
             if not (da_gauge.time == da_rad.time).all():
-                raise ValueError
-                
+                raise ValueError("""The time coordinates of the gauge dataset
+                                 do not match the radar""")
+                                 
             da_cml, da_gauge = xr.align(da_cml, da_gauge, join="inner")
             self.ds_obs = xr.merge([da_cml, da_gauge])
 
         # CML present, but not gauge
         elif (da_gauge is None) and (da_cml is not None):
-            # Check that both time dimensions are similar
+            # Check that both time dimensions are the same
             if not (da_cml.time == da_rad.time).all():
-                raise ValueError
-                
+                raise ValueError("""The time coordinates of the cml dataset
+                                 do not match the radar""")
+                                 
             self.ds_obs = da_cml
 
         # CML not present, gauge is
         elif (da_gauge is not None) and (da_cml is None):
             # Check that both time dimensions are similar
             if not (da_gauge.time == da_rad.time).all():
-                raise ValueError
-                
+                raise ValueError("""The time coordinates of the gauge dataset
+                                 do not match the radar""")
             self.ds_obs = da_gauge
 
         # This exception should not be raised
         else:
-            raise ValueError
+            raise ValueError('Gauge data or cml data not present')
 
         # Store radar
         self.da_rad = da_rad
