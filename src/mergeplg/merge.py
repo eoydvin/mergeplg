@@ -145,136 +145,111 @@ class Merge:
         # Location of grid point for weather radar, used in intersect weights
         self.grid_point_location = grid_point_location
         
-        # Init weights CML
-        self.intersect_weights = None
+        # Init weights CML 
+        self.intersect_weights = None        
         
-        # Init weights gauge
-        self.
+        # Init gauge possitions and names
+        self.get_grid_at_points = None
+        self.gauge_id = None
         
-    def update(da_rad, da_cml = None, da_gauge = None):
+        
+    def update_(self, da_rad, da_cml = None, da_gauge = None):
         # 
         
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
             raise ValueError('Please provide cml or gauge data')
-
-        # If CML data is present, compute radar rainfall along line
+            
         if da_cml is not None:
-            # Turn into dataset
-            da_cml = da_cml.to_dataset(name="obs")
-
-            # Calculate intersect weights
-            intersect_weights = (
-                plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-                    x1_line=da_cml.site_0_lon.data,
-                    y1_line=da_cml.site_0_lat.data,
-                    x2_line=da_cml.site_1_lon.data,
-                    y2_line=da_cml.site_1_lat.data,
-                    cml_id=da_cml.cml_id.data,
-                    x_grid=da_rad.lon.data,
-                    y_grid=da_rad.lat.data,
-                    grid_point_location=grid_location_radar,
+            # If intersect weights not computed, compute all weights
+            if self.intersect_weights is None:
+                self.intersect_weights = (
+                    plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+                        x1_line=da_cml.site_0_lon.data,
+                        y1_line=da_cml.site_0_lat.data,
+                        x2_line=da_cml.site_1_lon.data,
+                        y2_line=da_cml.site_1_lat.data,
+                        cml_id=da_cml.cml_id.data,
+                        x_grid=da_rad.lon.data,
+                        y_grid=da_rad.lat.data,
+                        grid_point_location=self.grid_point_location,
+                    )
                 )
-            )
+                
+            else: 
+                # New cml names
+                cml_id_new = np.sort(da_cml.cml_id.data)
+                
+                # cml names of previous update
+                cml_id_old = np.sort(self.intersect_weights.cml_id.data)
+        
+                # If new CML coord is present or old CML coord is removed
+                if not np.array_equal(cml_id_new, cml_id_old):
+                    # Identify cml_id that is in the new and old array
+                    cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
+                    
+                    # Strip the stored intersect weights, keeping only new ones
+                    self.intersect_weights = self.intersect_weights.sel(
+                        cml_id = cml_id_keep
+                        )
+                    
+                    # Identify cml_id not in the new
+                    missing_in_old = np.setdiff1d(cml_id_new, cml_id_old)
+                    
+                    # Slice da_cml to get only missing coords
+                    da_cml_add = da_cml.sel(cml_id = missing_in_old)
+                    
+                    # Interect weights of CMLs to add
+                    intersect_weights_add = (                
+                        plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+                            x1_line=da_cml_add.site_0_lon.data,
+                            y1_line=da_cml_add.site_0_lat.data,
+                            x2_line=da_cml_add.site_1_lon.data,
+                            y2_line=da_cml_add.site_1_lat.data,
+                            cml_id=da_cml_add.cml_id.data,
+                            x_grid=da_rad.lon.data,
+                            y_grid=da_rad.lat.data,
+                            grid_point_location=self.grid_point_location,
+                        )
+                    )
+                    
+                    # Add new intersect weights
+                    self.intersect_weights = xr.concat(
+                        [self.intersect_weights, intersect_weights_add], 
+                        dim='cml_id')
 
-            # Calculate radar ranfall along CMLs
-            da_cml["radar"] = plg.spatial.get_grid_time_series_at_intersections(
-                grid_data=da_rad,
-                intersect_weights=intersect_weights,
-            )
-
-            # Set x and y coordinates of the CML to imitate a rain gauge, this
-            # is used in code where the midpoint of the CML is used.
-            da_cml = da_cml.assign_coords(
-                x=("cml_id", (da_cml.site_0_x.data + da_cml.site_1_x.data) / 2)
-            )
-            da_cml = da_cml.assign_coords(
-                y=("cml_id", (da_cml.site_0_y.data + da_cml.site_1_y.data) / 2)
-            )
-
-            # Add sensor type metadata
-            da_cml = da_cml.assign_coords(
-                sensor_type=("cml_id", np.tile("cml", da_cml.cml_id.size))
-            )
-
-            # Rename observation coordinate to obs_id
-            da_cml = da_cml.rename({"cml_id": "obs_id"})
-
-        # If gauge data is present, compute radar rainfall at point
+        # If gauge data is present
         if da_gauge is not None:
-            # Turn into dataset
-            da_gauge = da_gauge.to_dataset(name="obs")
-
-            # Calculate gridpoints for gauges
-            get_grid_at_points = plg.spatial.GridAtPoints(
-                da_gridded_data=da_rad,
-                da_point_data=da_gauge,
-                nnear=1,
-                stat="best",
-            )
+            # If this is the first update
+            if self.get_grid_at_points is None:
+                # Calculate gridpoints for gauges
+                self.get_grid_at_points = plg.spatial.GridAtPoints(
+                    da_gridded_data=da_rad,
+                    da_point_data=da_gauge,
+                    nnear=1,
+                    stat="best",
+                )
             
-            # Calculate radar rainfall at gauge possitions
-            da_gauge["radar"] = get_grid_at_points(
-                da_gridded_data=da_rad,
-                da_point_data=da_gauge.obs,
-            )
-
-            # Set x and y coordinates of the raingauge to imitate a CML, this
-            # is used in the block kriging code where points are treated as 
-            # lines. 
-            da_gauge = da_gauge.assign_coords(site_0_x=("id", da_gauge.x.data))
-            da_gauge = da_gauge.assign_coords(site_1_x=("id", da_gauge.x.data))
-            da_gauge = da_gauge.assign_coords(site_0_y=("id", da_gauge.y.data))
-            da_gauge = da_gauge.assign_coords(site_1_y=("id", da_gauge.y.data))
-
-            # Add sensor type metadata
-            da_gauge = da_gauge.assign_coords(
-                sensor_type=("cml_id", np.tile("gauge", da_gauge.id.size))
-            )
-
-            # Rename observation coordinate to obs_id
-            da_gauge = da_gauge.rename({"id": "obs_id"})
-
-        # CML and radar data present
-        if (da_gauge is not None) and (da_cml is not None):
-            
-            # Check that all time dimensions are the same
-            if not (da_cml.time == da_rad.time).all():
-                raise ValueError("""The time coordinates of the cml dataset
-                                 do not match the radar""")
-                                 
-            if not (da_gauge.time == da_rad.time).all():
-                raise ValueError("""The time coordinates of the gauge dataset
-                                 do not match the radar""")
-                                 
-            da_cml, da_gauge = xr.align(da_cml, da_gauge, join="inner")
-            self.ds_obs = xr.merge([da_cml, da_gauge])
-
-        # CML present, but not gauge
-        elif (da_gauge is None) and (da_cml is not None):
-            # Check that both time dimensions are the same
-            if not (da_cml.time == da_rad.time).all():
-                raise ValueError("""The time coordinates of the cml dataset
-                                 do not match the radar""")
-                                 
-            self.ds_obs = da_cml
-
-        # CML not present, gauge is
-        elif (da_gauge is not None) and (da_cml is None):
-            # Check that both time dimensions are similar
-            if not (da_gauge.time == da_rad.time).all():
-                raise ValueError("""The time coordinates of the gauge dataset
-                                 do not match the radar""")
-            self.ds_obs = da_gauge
-
-        # This exception should not be raised
-        else:
-            raise ValueError('Gauge data or cml data not present')
-
-        # Store radar
-        self.da_rad = da_rad
-
-
+            else:
+                
+                # Get names of new gauges
+                gauge_id_new = da_gauge.id.data
+                
+                # Get names of gauges in previous update
+                gauge_id_old = self.gauge_id
+                
+                # Check that equal, element order is important
+                if not np.array_equal(gauge_id_new, gauge_id_old):
+                    # Calculate new gauge possitions
+                    self.get_grid_at_points = plg.spatial.GridAtPoints(
+                        da_gridded_data=da_rad,
+                        da_point_data=da_gauge,
+                        nnear=1,
+                        stat="best",
+                    )
+                    
+                    # Store new gauge names
+                    self.gauge_id = da_gauge.id.data
 
 
 class MergeAdditiveIDW(Merge):
