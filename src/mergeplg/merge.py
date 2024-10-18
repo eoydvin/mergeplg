@@ -120,31 +120,14 @@ def calculate_cml_geometry(ds_cmls, disc=8):
     return np.array([ypos, xpos]).transpose([1, 0, 2])
 
 
-
-test
-
-
 class Merge:
     """Common code for all merging methods.
 
-    Performs basic checks such as checking that the CML and radar data has the
-    same timestamps. Stores CML data, radar data, radar grid and hyperparamters
-    to self. Calculates the radar rainfall values along all CMLs for all
-    timesteps.
-
-    Parameters
-    ----------
-    da_cml: xarray.DataArray
-        CML observations. Must contain the transformed coordinates site_0_x,
-        site_1_x, site_0_y and site_1_y.
-    ds_rad: xarray.DataArray
-        Gridded radar data. Must contain the x and y meshgrid given as xs
-        and ys.
-    grid_location_radar: str
-        String indicating the grid location of the radar. Used for calculating
-        the radar values along each CML.
-    min_obs: int
-        Minimum number of observations needed in order to do adjustment.
+    init just initializes to parameters
+    
+    method update: updates the geometry of the 
+    
+    
 
     Returns
     -------
@@ -153,12 +136,24 @@ class Merge:
 
     def __init__(
         self,
-        da_rad,
-        da_cml=None,
-        da_gauge=None,
-        grid_location_radar="center",
+        grid_point_location="center",
         min_obs=5,
     ):
+        # Number of observations required to do radar adjustment
+        self.min_obs_ = min_obs
+        
+        # Location of grid point for weather radar, used in intersect weights
+        self.grid_point_location = grid_point_location
+        
+        # Init weights CML
+        self.intersect_weights = None
+        
+        # Init weights gauge
+        self.
+        
+    def update(da_rad, da_cml = None, da_gauge = None):
+        # 
+        
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
             raise ValueError('Please provide cml or gauge data')
@@ -279,8 +274,7 @@ class Merge:
         # Store radar
         self.da_rad = da_rad
 
-        # Stor hyperparameters
-        self.min_obs_ = min_obs
+
 
 
 class MergeAdditiveIDW(Merge):
