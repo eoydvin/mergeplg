@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Fri Oct 18 20:21:53 2024
 
 @author: erlend
 """
+
 import numpy as np
 import xarray as xr
 from sklearn.neighbors import KNeighborsRegressor

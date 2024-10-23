@@ -6,16 +6,18 @@ import numpy as np
 import poligrain as plg
 import xarray as xr
 
-from .merge_functions import (
-    calculate_cml_geometry,
-    calculate_cml_midpoint,
-    calculate_gauge_midpoint,
-    estimate_transformation,
-    estimate_variogram,
-    merge_additive_blockkriging,
-    merge_additive_idw,
-    merge_ked_blockkriging,
-)
+from mergeplg import merge_functions
+
+# from .merge_functions import (
+#     calculate_cml_geometry,
+#     calculate_cml_midpoint,
+#     calculate_gauge_midpoint,
+#     estimate_transformation,
+#     estimate_variogram,
+#     merge_additive_blockkriging,
+#     merge_additive_idw,
+#     merge_ked_blockkriging,
+# )
 
 
 class Merge:
@@ -63,7 +65,7 @@ class Merge:
             Gridded radar data. Must contain the x and y meshgrid
         da_cml: xarray.DataArray
             CML observations. Must contain the transformed coordinates site_0_x,
-            site_1_x, site_0_y and site_1_y.
+            site_1_x, site_0_y and site_1_y. And lon/lat..
         da_gauge: xarray.DataArray
             gauge observations. Must contain the transformed coordinates y, x.
         """
@@ -90,7 +92,7 @@ class Merge:
                 )
 
                 # Calculate CML midpoints
-                self.x0_cml = calculate_cml_midpoint(da_cml)
+                self.x0_cml = merge_functions.calculate_cml_midpoint(da_cml)
 
             else:
                 # New cml names
@@ -138,7 +140,7 @@ class Merge:
                     )
 
                     # Calculate CML midpoint for new CMLs
-                    x0_cml_add = calculate_cml_midpoint(da_cml_add)
+                    x0_cml_add = merge_functions.calculate_cml_midpoint(da_cml_add)
 
                     # Add to existing x0
                     self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
@@ -159,7 +161,7 @@ class Merge:
                 )
 
                 # Calculate gauge coordinates
-                self.x0_gauge = calculate_gauge_midpoint(da_gauge)
+                self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
 
             else:
                 # Get names of new gauges
@@ -179,7 +181,7 @@ class Merge:
                     )
 
                 # Calculate gauge coordinates
-                self.x0_gauge = calculate_gauge_midpoint(da_gauge)
+                self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
 
             # Sort x0_gauge so it follows the same order as da_gauge
             self.x0_gauge = self.x0_gauge.sel(id=da_gauge.id.data)
@@ -222,7 +224,7 @@ class Merge:
                 )
 
                 # CML coordinates along all links
-                self.x0_cml = calculate_cml_geometry(
+                self.x0_cml = merge_functions.calculate_cml_geometry(
                     da_cml, discretization=discretization
                 )
 
@@ -272,7 +274,7 @@ class Merge:
                     )
 
                     # Calculate CML geometry for new links
-                    x0_cml_add = calculate_cml_geometry(
+                    x0_cml_add = merge_functions.calculate_cml_geometry(
                         da_cml_add, discretization=discretization
                     )
 
@@ -295,7 +297,7 @@ class Merge:
                 )
 
                 # Calculate gauge coordinates
-                x0_gauge = calculate_gauge_midpoint(da_gauge)
+                x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
 
                 # Repeat the same coordinates so that the array gets the same
                 # shape as x0_cml, used for block kriging
@@ -321,7 +323,7 @@ class Merge:
                     )
 
                     # Calculate gauge coordinates
-                    x0_gauge = calculate_gauge_midpoint(da_gauge)
+                    x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
 
                     # As the gauge is just a point, repeat the gauge coord
                     self.x0_gauge = x0_gauge.expand_dims(
@@ -488,7 +490,7 @@ class MergeAdditiveIDW(Merge):
             da_rad_t = da_rad.sel(time=time)
 
             # do addtitive IDW merging
-            adjusted = merge_additive_idw(
+            adjusted = merge_functions.merge_additive_idw(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 diff[keep],
                 x0[keep, :],
@@ -567,7 +569,7 @@ class MergeAdditiveBlockKriging(Merge):
             adjusted radar field.
         """
         if variogram is None:
-            estimate_variogram()
+            merge_functions.estimate_variogram()
 
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
@@ -587,7 +589,7 @@ class MergeAdditiveBlockKriging(Merge):
             da_rad_t = da_rad.sel(time=time)
 
             # do addtitive IDW merging
-            adjusted = merge_additive_blockkriging(
+            adjusted = merge_functions.merge_additive_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 diff[keep],
                 x0[keep, :],
@@ -686,10 +688,10 @@ class MergeBlockKrigingExternalDrift(Merge):
             adjusted radar field.
         """
         if variogram is None:
-            estimate_variogram()
+            merge_functions.estimate_variogram()
 
         if (transform is None) | (backtransform is None):
-            estimate_transformation()
+            merge_functions.estimate_transformation()
 
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
@@ -706,7 +708,7 @@ class MergeBlockKrigingExternalDrift(Merge):
             da_rad_t = da_rad.sel(time=time)
 
             # do addtitive IDW merging
-            adjusted = merge_ked_blockkriging(
+            adjusted = merge_functions.merge_ked_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 rad[keep],
                 transform(obs)[keep],
