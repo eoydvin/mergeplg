@@ -141,6 +141,19 @@ def test_MergeAdditiveIDW():
         gauge_r = da_gauges_t2.sel(id=id).data
         assert gauge_r == merge_r
 
+    # Test that da_rad is return if too few obs is provided
+    merge_IDW.min_obs_ = 10
+    adjusted = merge_IDW.adjust(
+        da_rad_t,
+        da_cml=da_cml_t2,
+        da_gauge=None,
+    )
+    np.testing.assert_almost_equal(
+        adjusted.data,
+        da_rad_t.data,
+    )
+    merge_IDW.min_obs_ = 1  # reset
+
 
 def test_MergeAdditiveBlockKriging():
     # CML and rain gauge overlapping sets
@@ -312,6 +325,20 @@ def test_MergeAdditiveBlockKriging():
             merge_r,
             gauge_r,
         )
+
+    # Test that da_rad is return if too few obs is provided
+    merge_BK.min_obs_ = 10
+    adjusted = merge_BK.adjust(
+        da_rad_t,
+        da_cml=da_cml_t2,
+        da_gauge=None,
+        variogram=variogram,
+    )
+    np.testing.assert_almost_equal(
+        adjusted.data,
+        da_rad_t.data,
+    )
+    merge_BK.min_obs_ = 1  # reset
 
 
 def test_MergeBlockKrigingExternalDrift():
@@ -503,3 +530,74 @@ def test_MergeBlockKrigingExternalDrift():
             merge_r,
             gauge_r,
         )
+
+    # Test that providing only rain gauge adjusts only at rain gauge
+    adjusted = merge_KED.adjust(
+        da_rad_t,
+        da_cml=None,
+        da_gauge=da_gauges_t2,
+        variogram=variogram,
+        transform=transform,
+        backtransform=backtransform,
+    )
+
+    # Test adjusted field at rain gauges
+    for gauge_id in da_gauges_t2.id:
+        merge_r = adjusted.sel(
+            x=da_gauges_t2.sel(id=gauge_id).x.data,
+            y=da_gauges_t2.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = da_gauges_t2.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+        )
+
+    # Test that providing only cml adjusts at cml
+    adjusted = merge_KED.adjust(
+        da_rad_t,
+        da_cml=da_cml_t2,
+        da_gauge=None,
+        variogram=variogram,
+        transform=transform,
+        backtransform=backtransform,
+    )
+
+    # calculate the adjusted field along CMLs
+    intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
+        x1_line=da_cml_t2.site_0_lon.data,
+        y1_line=da_cml_t2.site_0_lat.data,
+        x2_line=da_cml_t2.site_1_lon.data,
+        y2_line=da_cml_t2.site_1_lat.data,
+        cml_id=da_cml_t2.cml_id.data,
+        x_grid=adjusted.lon.data,
+        y_grid=adjusted.lat.data,
+        grid_point_location="center",
+    )
+    adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
+        grid_data=adjusted.expand_dims("time"),
+        intersect_weights=intersect_weights,
+    )
+
+    # Test cml almost equal
+    np.testing.assert_almost_equal(
+        adjusted_at_cmls.data.ravel(),
+        da_cml_t2.data.ravel(),
+        decimal=1,  # not very precise, but decent
+    )
+
+    # Test that da_rad is return if too few obs is provided
+    merge_KED.min_obs_ = 10
+    adjusted = merge_KED.adjust(
+        da_rad_t,
+        da_cml=da_cml_t2,
+        da_gauge=None,
+        variogram=variogram,
+        transform=transform,
+        backtransform=backtransform,
+    )
+    np.testing.assert_almost_equal(
+        adjusted.data,
+        da_rad_t.data,
+    )
+    merge_KED.min_obs_ = 1  # reset
