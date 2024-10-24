@@ -5,13 +5,12 @@ from __future__ import annotations
 import numpy as np
 import poligrain as plg
 import xarray as xr
-from scipy import stats
 
 from mergeplg import merge_functions
 
 
 class Merge:
-    """Update weigths and geometry and evaluate radar at CMLs and rain gauges
+    """Update weights and geometry and evaluate radar at CMLs and rain gauges
 
     This is the parent class for the merging methods. It works by keeping a
     copy of the weights used for obtaining radar observations at the ground for
@@ -28,7 +27,7 @@ class Merge:
         grid_point_location="center",
         min_obs=5,
     ):
-        """Constructor for merge parent class
+        """Construct merge class
 
         Parameters
         ----------
@@ -39,7 +38,7 @@ class Merge:
         self.intersect_weights xarray.Dataset
             Weights for getting radar observations along CMLs.
         self.get_grid_at_points function
-            Returns the radar value at the rain gauge possitions.
+            Returns the radar value at the rain gauge positions.
         self.x0_cml xarray.DataArray
             Midpoint or discretized coordinates along the CMLs, depending on
             if update_ or update_block_ was used to update geometry
@@ -78,7 +77,7 @@ class Merge:
             projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon) as well as the projected coordinates (x, y).
+            positions (lat, lon) as well as the projected coordinates (x, y).
         """
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
@@ -213,7 +212,7 @@ class Merge:
             projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon) as well as the projected coordinates (x, y).
+            positions (lat, lon) as well as the projected coordinates (x, y).
         """
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
@@ -356,11 +355,11 @@ class Merge:
             Gridded radar data. Must contain the lon and lat coordinates as a
             meshgrid.
         da_cml: xarray.DataArray
-            CML observations. Must contain the coordinates for the CML possitions
+            CML observations. Must contain the coordinates for the CML positions
             (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
         da_gauge: xarray.DataArray
             gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon)
+            positions (lat, lon)
         """
         # If CML and gauge data is provided
         if (da_cml is not None) and (da_gauge is not None):
@@ -475,7 +474,7 @@ class MergeAdditiveIDW(Merge):
             projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon) as well as the projected coordinates (x, y).
+            positions (lat, lon) as well as the projected coordinates (x, y).
 
         Returns
         -------
@@ -546,7 +545,7 @@ class MergeAdditiveBlockKriging(Merge):
             da_rad, self.discretization, da_cml=da_cml, da_gauge=da_gauge
         )
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram='exponential'):
+    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram="exponential"):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -563,9 +562,9 @@ class MergeAdditiveBlockKriging(Merge):
             projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon) as well as the projected coordinates (x, y).
+            positions (lat, lon) as well as the projected coordinates (x, y).
         variogram: function or str
-            If function: Must return expected variance given distance between 
+            If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
 
         Returns
@@ -576,7 +575,7 @@ class MergeAdditiveBlockKriging(Merge):
         """
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        
+
         # Calculate radar-instrument difference if radar has observation
         diff = np.where(rad > 0, obs - rad, np.nan)
 
@@ -650,7 +649,7 @@ class MergeBlockKrigingExternalDrift(Merge):
         da_rad,
         da_cml=None,
         da_gauge=None,
-        variogram='exponential',
+        variogram="exponential",
         transform=None,
         backtransform=None,
     ):
@@ -674,9 +673,9 @@ class MergeBlockKrigingExternalDrift(Merge):
             projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
-            possitions (lat, lon) as well as the projected coordinates (x, y).
+            positions (lat, lon) as well as the projected coordinates (x, y).
         variogram: function
-            If function: Must return expected variance given distance between 
+            If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
         transform: function
             Transform rainfall distribution to Gaussian distributed data
@@ -691,10 +690,10 @@ class MergeBlockKrigingExternalDrift(Merge):
         """
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        
+
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
-        
+
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
             # If transformation functions not provided, estimate it from obs.
@@ -702,7 +701,7 @@ class MergeBlockKrigingExternalDrift(Merge):
                 transform, backtransform = merge_functions.estimate_transformation(
                     obs=obs[keep],
                 )
-    
+
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
                 variogram = merge_functions.estimate_variogram(
@@ -724,31 +723,12 @@ class MergeBlockKrigingExternalDrift(Merge):
                 x0[keep],
                 variogram,
             )
-            
-            # Skip nan
-            mask = ~np.isnan(adjusted.data)
-            rank = adjusted.data
-            
-            # Rank-transform adjusted data, 'dense' allows for duplicate ranks     
-            rank[mask] = stats.rankdata(rank[mask], method='dense')
-            
-            # Transform to 0-1
-            rank = (rank - 1) / (rank.size - 1)
 
             # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(rank))
-                        
-            # import matplotlib.pyplot as plt 
-            # plt.imshow(rank)
-            # plt.colorbar()
-            # plt.show()
-            
-            # xx = np.linspace(0, 1, 100)
-            # plt.plot(xx, backtransform(xx))
-            # plt.show()
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(adjusted))
 
-            # # Re-assign timestamp and return
-            # return adjusted.assign_coords(time=time)
+            # Re-assign timestamp and return
+            return adjusted.assign_coords(time=time)
 
         # Else return the unadjusted radar
         return da_rad

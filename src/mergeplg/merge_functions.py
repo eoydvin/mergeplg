@@ -5,8 +5,8 @@ Created on Fri Oct 18 20:21:53 2024
 """
 
 import numpy as np
-import xarray as xr
 import pykrige
+import xarray as xr
 from scipy import stats
 from sklearn.neighbors import KNeighborsRegressor
 
@@ -459,14 +459,14 @@ def calculate_gauge_midpoint(da_gauge):
     )
 
 
-def estimate_variogram(obs, x0, variogram_model='exponential'):
+def estimate_variogram(obs, x0, variogram_model="exponential"):
     """Estimate variogram from CML and/or rain gauge data
 
     Estimates the variogram using the CML midpoints to estimate the distances.
     Uses pykrige as backend.
 
     Returns
-    ------
+    -------
     variogram: function
         Variogram function that returns the expected variance given the
         distance between observations.
@@ -474,21 +474,22 @@ def estimate_variogram(obs, x0, variogram_model='exponential'):
     """
     # If x0 contains block data, get approximate midpoints
     if len(x0.shape) > 2:
-        x0 = x0[:, :, int(x0.shape[1]/2)]
-    
+        x0 = x0[:, :, int(x0.shape[1] / 2)]
+
     # Fit variogram using pykrige
-    OK = pykrige.OrdinaryKriging(
-                x0[:, 1], # x coordinate
-                x0[:, 0], # y coordinate
-                obs,
-                variogram_model=variogram_model,
-            )        
-        
+    ok = pykrige.OrdinaryKriging(
+        x0[:, 1],  # x coordinate
+        x0[:, 0],  # y coordinate
+        obs,
+        variogram_model=variogram_model,
+    )
+
     # construct variogram using pykrige
     def variogram(h):
-        return OK.variogram_function(OK.variogram_model_parameters, h)
-    
-    return variogram 
+        return ok.variogram_function(ok.variogram_model_parameters, h)
+
+    return variogram
+
 
 def estimate_transformation(obs):
     """Estimate transformation from CML and/or rain gauge data
@@ -497,26 +498,23 @@ def estimate_transformation(obs):
     as backend.
 
     Returns
-    ------
+    -------
     transformation: function
-        Transformation function that transforms rainfall data to Gaussian 
+        Transformation function that transforms rainfall data to Gaussian
         distribution
     backtransformation: function
         Backtransformation function that transforms rainfall data from Gaussian
-        distribution to Gamma distribution. 
+        distribution to Gamma distribution.
     """
-    
     # Estimate parameters of Gamma distribution
     k, loc, scale = stats.gamma.fit(obs)
-    
+
     # Define transformation function
     def transformation(h):
         return stats.norm(0, 1).ppf(stats.gamma(k, loc=loc, scale=scale).cdf(h))
-    
-    # Define backtransformation function, assumes rank transformed data
+
+    # Define backtransformation function
     def backtransformation(h):
-        return stats.gamma(k, loc=loc, scale=scale).ppf(h)
-        #return gamma(k, loc=loc, scale=scale).ppf(norm(0, 1).cdf(h))
-    
+        return stats.gamma(k, loc=loc, scale=scale).ppf(stats.norm(0, 1).cdf(h))
+
     return transformation, backtransformation
-    

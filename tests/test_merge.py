@@ -189,24 +189,24 @@ def test_MergeAdditiveBlockKriging():
     # Test that gauge midpoint coordinates corresponds to x0_gauge
     assert (merge_BK.x0_gauge.isel(yx=1) == da_gauges_t1.x).all()
     assert (merge_BK.x0_gauge.isel(yx=0) == da_gauges_t1.y).all()
-    
+
     # Test that automatic variogram estimation works
     adjusted = merge_BK.adjust(
-        da_rad_t, da_cml=da_cml_t1, da_gauge=da_gauges_t1, variogram='exponential'
-    )    
-    
+        da_rad_t, da_cml=da_cml_t1, da_gauge=da_gauges_t1, variogram="exponential"
+    )
+
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-                [7.  , 4.75, 7.  , 7.  ],
-                [7.  , 7.  , 4.75, 9.25],
-                [7.  , 5.  , 9.25, 4.75],
-                [7.  , 9.25, 7.  , 9.  ]
+            [7.0, 4.75, 7.0, 7.0],
+            [7.0, 7.0, 4.75, 9.25],
+            [7.0, 5.0, 9.25, 4.75],
+            [7.0, 9.25, 7.0, 9.0],
         ]
     )
 
-    np.testing.assert_almost_equal(adjusted, data_check)    
-    
+    np.testing.assert_almost_equal(adjusted, data_check)
+
     # Test the rest of the code with a simple variogram
     def variogram(h):
         return h
@@ -401,23 +401,22 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad_t,
         da_cml=da_cml_t1,
         da_gauge=da_gauges_t1,
-        variogram='exponential',
+        variogram="exponential",
         transform=None,
         backtransform=None,
     )
-    
+
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
             [6.9999667, 4.7500089, 6.9999667, 6.9999667],
             [6.9999667, 6.9999667, 4.7500089, 9.2500089],
-            [6.9999667, 5.       , 9.2500089, 4.7500089],
-            [6.9999667, 9.2500089, 6.9999667, 9.       ]
+            [6.9999667, 5.0, 9.2500089, 4.7500089],
+            [6.9999667, 9.2500089, 6.9999667, 9.0],
         ]
     )
 
-    np.testing.assert_almost_equal(adjusted, data_check)    
-
+    np.testing.assert_almost_equal(adjusted, data_check)
 
     # Simple linear variogram and transformation functions for testing
     def variogram(h):
