@@ -54,9 +54,9 @@ ds_rad = xr.Dataset(
 )
 
 
-def test_calculate_cml_geometry():
+def test_calculate_cml_line():
     # Test that the CML geometry is correctly esimtated
-    y, x = merge_functions.calculate_cml_geometry(
+    y, x = merge_functions.calculate_cml_line(
         ds_cmls.isel(cml_id=[1]),
         discretization=2,  # divides the line into two intervals, 3 points
     ).data[0]
@@ -67,7 +67,7 @@ def test_calculate_cml_geometry():
 def test_block_points_to_lengths():
     # Check that the length matrix is correctly estimated
     line = merge_functions.block_points_to_lengths(
-        merge_functions.calculate_cml_geometry(
+        merge_functions.calculate_cml_line(
             ds_cmls.isel(cml_id=[0, 1]), discretization=2
         ).data
     )
@@ -168,7 +168,7 @@ def test_merge_additive_blockkriging():
         ds_cmls["R_diff"].loc[{"cml_id": cml_id}] = cml_r - rad_r
 
     # Calculate CML geometry
-    x0 = merge_functions.calculate_cml_geometry(ds_cmls).data
+    x0 = merge_functions.calculate_cml_line(ds_cmls).data
 
     # Define variogram (exponential)
     def variogram(h):  # Exponential variogram
@@ -209,7 +209,7 @@ def test_merge_ked_blockkriging():
         ds_cmls["cml_rad"].loc[{"cml_id": cml_id}] = rad_r
 
     # Calculate CML geometry
-    x0 = merge_functions.calculate_cml_geometry(ds_cmls).data
+    x0 = merge_functions.calculate_cml_line(ds_cmls).data
 
     # Define variogram (exponential)
     def variogram(h):  # Exponential variogram

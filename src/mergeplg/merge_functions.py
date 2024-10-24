@@ -6,6 +6,8 @@ Created on Fri Oct 18 20:21:53 2024
 
 import numpy as np
 import xarray as xr
+import pykrige
+from scipy import stats
 from sklearn.neighbors import KNeighborsRegressor
 
 
@@ -323,10 +325,10 @@ def block_points_to_lengths(x0):
     )
 
 
-def calculate_cml_geometry(ds_cmls, discretization=8):
+def calculate_cml_line(ds_cmls, discretization=8):
     """Calculate the position of points along CMLs.
 
-    Calculates the discretized CML geometry by dividing the CMLs into
+    Calculates the discretized CML line coordinates by dividing the CMLs into
     discretization-number of intervals. The ds_cmls xarray object must contain the
     projected coordinates (site_0_x, site_0_y, site_1_x site_1_y) defining
     the start and end point of the CML. If no such projection is available
@@ -457,39 +459,64 @@ def calculate_gauge_midpoint(da_gauge):
     )
 
 
-def estimate_variogram():
-    """Estimate variogram given data
+def estimate_variogram(obs, x0, variogram_model='exponential'):
+    """Estimate variogram from CML and/or rain gauge data
 
-    Not yet implemented
-
-    Raises
-    ------
-    ValueError
-        Automatic variogram estimation not yet implemented.
+    Estimates the variogram using the CML midpoints to estimate the distances.
+    Uses pykrige as backend.
 
     Returns
-    -------
-    None.
+    ------
+    variogram: function
+        Variogram function that returns the expected variance given the
+        distance between observations.
 
     """
-    msg = "Automatic variogram estimation not yet implemented."
-    raise ValueError(msg)
+    # If x0 contains block data, get approximate midpoints
+    if len(x0.shape) > 2:
+        x0 = x0[:, :, int(x0.shape[1]/2)]
+    
+    # Fit variogram using pykrige
+    OK = pykrige.OrdinaryKriging(
+                x0[:, 1], # x coordinate
+                x0[:, 0], # y coordinate
+                obs,
+                variogram_model=variogram_model,
+            )        
+        
+    # construct variogram using pykrige
+    def variogram(h):
+        return OK.variogram_function(OK.variogram_model_parameters, h)
+    
+    return variogram 
 
+def estimate_transformation(obs):
+    """Estimate transformation from CML and/or rain gauge data
 
-def estimate_transformation():
-    """Estimate transformation function given data
-
-    Not yet implemented
-
-    Raises
-    ------
-    ValueError
-        Automatic transformation function estimation not yet implemented.
+    Estimate the transformation function using a gamma distribution and scipy
+    as backend.
 
     Returns
-    -------
-    None.
-
+    ------
+    transformation: function
+        Transformation function that transforms rainfall data to Gaussian 
+        distribution
+    backtransformation: function
+        Backtransformation function that transforms rainfall data from Gaussian
+        distribution to Gamma distribution. 
     """
-    msg = "Automatic transformation function estimation not yet implemented."
-    raise ValueError(msg)
+    
+    # Estimate parameters of Gamma distribution
+    k, loc, scale = stats.gamma.fit(obs)
+    
+    # Define transformation function
+    def transformation(h):
+        return stats.norm(0, 1).ppf(stats.gamma(k, loc=loc, scale=scale).cdf(h))
+    
+    # Define backtransformation function, assumes rank transformed data
+    def backtransformation(h):
+        return stats.gamma(k, loc=loc, scale=scale).ppf(h)
+        #return gamma(k, loc=loc, scale=scale).ppf(norm(0, 1).cdf(h))
+    
+    return transformation, backtransformation
+    

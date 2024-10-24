@@ -5,20 +5,22 @@ from __future__ import annotations
 import numpy as np
 import poligrain as plg
 import xarray as xr
+from scipy import stats
 
 from mergeplg import merge_functions
+
 
 class Merge:
     """Update weigths and geometry and evaluate radar at CMLs and rain gauges
 
-    This is the parent class for the merging methods. It works by keeping a 
+    This is the parent class for the merging methods. It works by keeping a
     copy of the weights used for obtaining radar observations at the ground for
-    the CMLs (self.intersect_weights and self.x0_cml) and the rain gauges 
-    (self.get_grid_at_points and self.x0_rain_gauges). Running method 'update_' 
-    or 'update_block_' compares the provided CML names with the existing names 
-    stored in self.intersect_weights and adds weights and self.x0_cmls for new 
+    the CMLs (self.intersect_weights and self.x0_cml) and the rain gauges
+    (self.get_grid_at_points and self.x0_rain_gauges). Running method 'update_'
+    or 'update_block_' compares the provided CML names with the existing names
+    stored in self.intersect_weights and adds weights and self.x0_cmls for new
     CMLs. For rain gauges both self.x0_gauge and self.get_grid_at_points is
-    fully re-calculated if a new set of rain gauges is provided. 
+    fully re-calculated if a new set of rain gauges is provided.
     """
 
     def __init__(
@@ -26,16 +28,16 @@ class Merge:
         grid_point_location="center",
         min_obs=5,
     ):
-        """ Constructor for merge parent class
-        
+        """Constructor for merge parent class
+
         Parameters
         ----------
         self.min_obs: int
-            Number of observations required to perform adjustment. 
+            Number of observations required to perform adjustment.
         self.grid_point_location str
             Radar grid cell reference position. For instance 'center'.
         self.intersect_weights xarray.Dataset
-            Weights for getting radar observations along CMLs. 
+            Weights for getting radar observations along CMLs.
         self.get_grid_at_points function
             Returns the radar value at the rain gauge possitions.
         self.x0_cml xarray.DataArray
@@ -68,14 +70,15 @@ class Merge:
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as a 
+            Gridded radar data. Must contain the lon and lat coordinates as a
             meshgrid.
         da_cml: xarray.DataArray
-            CML observations. Must contain the coordinates for the CML possitions
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
-            gauge observations. Must contain the coordinates for the rain gauge 
-            possitions (lat, lon)
+            Gauge observations. Must contain the coordinates for the rain gauge
+            possitions (lat, lon) as well as the projected coordinates (x, y).
         """
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
@@ -102,7 +105,7 @@ class Merge:
 
                 # Calculate CML midpoints
                 self.x0_cml = merge_functions.calculate_cml_midpoint(da_cml)
-            
+
             # Update weights, reusing already computed weights
             else:
                 # New cml names
@@ -110,21 +113,19 @@ class Merge:
 
                 # cml names of previous update
                 cml_id_old = np.sort(self.intersect_weights.cml_id.data)
-                
+
                 # Identify cml_id that is in the new and old array
                 cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
 
                 # Slice the stored intersect weights, keeping only new ones
-                self.intersect_weights = self.intersect_weights.sel(
-                    cml_id=cml_id_keep
-                )
+                self.intersect_weights = self.intersect_weights.sel(cml_id=cml_id_keep)
 
                 # Slice stored CML midpoints, keeping only new ones
                 self.x0_cml = self.x0_cml.sel(cml_id=cml_id_keep)
 
                 # Identify new cml_id
                 cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
-                
+
                 # If new cml_ids available
                 if cml_id_not_in_old.size > 0:
                     # Slice da_cml to get only missing coords
@@ -198,21 +199,22 @@ class Merge:
 
         This function uses the full CML geometry and makes the rain gauge look
         like a line with zero length.
-        
+
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as a 
+            Gridded radar data. Must contain the lon and lat coordinates as a
             meshgrid.
         discretization: int
             Number of discretized intervals for the CMLs.
         da_cml: xarray.DataArray
-            CML observations. Must contain the coordinates for the CML possitions
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            gauge observations. Must contain the coordinates for the rain gauge 
-            possitions (lat, lon)
-        """        
+            Gauge observations. Must contain the coordinates for the rain gauge
+            possitions (lat, lon) as well as the projected coordinates (x, y).
+        """
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
             msg = "Please provide cml or gauge data"
@@ -236,10 +238,10 @@ class Merge:
                 )
 
                 # CML coordinates along all links
-                self.x0_cml = merge_functions.calculate_cml_geometry(
+                self.x0_cml = merge_functions.calculate_cml_line(
                     da_cml, discretization=discretization
                 )
-                
+
             # Update weights, reusing already computed weights
             else:
                 # New cml names
@@ -252,9 +254,7 @@ class Merge:
                 cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
 
                 # Slice the stored intersect weights, keeping only new ones
-                self.intersect_weights = self.intersect_weights.sel(
-                    cml_id=cml_id_keep
-                )
+                self.intersect_weights = self.intersect_weights.sel(cml_id=cml_id_keep)
 
                 # Slice stored CML midpoints, keeping only new ones
                 self.x0_cml = self.x0_cml.sel(cml_id=cml_id_keep)
@@ -283,20 +283,16 @@ class Merge:
 
                     # Add new intersect weights
                     self.intersect_weights = xr.concat(
-                        [self.intersect_weights, intersect_weights_add], 
-                        dim="cml_id"
+                        [self.intersect_weights, intersect_weights_add], dim="cml_id"
                     )
 
                     # Calculate CML geometry for new links
-                    x0_cml_add = merge_functions.calculate_cml_geometry(
+                    x0_cml_add = merge_functions.calculate_cml_line(
                         da_cml_add, discretization=discretization
                     )
 
                     # Add new x0 to self.x0_cml
-                    self.x0_cml = xr.concat(
-                        [self.x0_cml, x0_cml_add], 
-                        dim="cml_id"
-                    )
+                    self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
 
             # Sort x0_cml so it follows the same order as da_cml
             self.x0_cml = self.x0_cml.sel(cml_id=da_cml.cml_id.data)
@@ -357,13 +353,13 @@ class Merge:
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as a 
+            Gridded radar data. Must contain the lon and lat coordinates as a
             meshgrid.
         da_cml: xarray.DataArray
             CML observations. Must contain the coordinates for the CML possitions
             (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
         da_gauge: xarray.DataArray
-            gauge observations. Must contain the coordinates for the rain gauge 
+            gauge observations. Must contain the coordinates for the rain gauge
             possitions (lat, lon)
         """
         # If CML and gauge data is provided
@@ -372,7 +368,7 @@ class Merge:
             assert da_rad.time.size == 1, "Select only one time step"
             assert da_cml.time.size == 1, "Select only one time step"
             assert da_gauge.time.size == 1, "Select only one time step"
-            
+
             # Calculate radar along CMLs using intersect weights
             rad_cml = (
                 plg.spatial.get_grid_time_series_at_intersections(
@@ -443,7 +439,7 @@ class Merge:
 class MergeAdditiveIDW(Merge):
     """Merge CML and radar using an additive IDW (CML midpoint).
 
-    Marges the provided radar field in ds_rad to CML observations by
+    Merges the provided radar field in ds_rad to CML observations by
     interpolating the difference between the CML and radar observations using
     IDW.
     """
@@ -459,31 +455,27 @@ class MergeAdditiveIDW(Merge):
         """Update weights and x0 geometry for CML and gauge
 
         This function uses the midpoint of the CML as CML reference.
-
-        Parameters
-        ----------
-        da_rad: xarray.DataArray
-            Gridded radar data.
-        da_cml: xarray.DataArray
-            CML observations.
-        da_gauge: xarray.DataArray
-            gauge observations.
         """
         self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(self, da_rad, da_cml=None, da_gauge=None):
         """Adjust radar field for one time step.
 
-        Evaluates if we have enough observations to adjust the radar field.
+        Adjust radar field for one time step. The function assumes that the
+        weights are updated using the update class method.
 
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data.
+            Gridded radar data. Must contain the lon and lat coordinates as
+            well as the projected coordinates xs and ys as a meshgrid.
         da_cml: xarray.DataArray
-            CML observations.
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
-            gauge observations.
+            Gauge observations. Must contain the coordinates for the rain gauge
+            possitions (lat, lon) as well as the projected coordinates (x, y).
 
         Returns
         -------
@@ -526,11 +518,11 @@ class MergeAdditiveIDW(Merge):
 
 
 class MergeAdditiveBlockKriging(Merge):
-    """Merge CML and radar using an additive block kriging.
+    """Merge CML and radar using additive block kriging
 
-    Marges the provided radar field in ds_rad to CML observations by
-    interpolating the difference between the CML and radar observations using
-    block kriging.
+    Merges the provided radar field in ds_rad to CML and rain gauge
+    observations by interpolating the difference between radar and ground
+    observations using block kriging.
     """
 
     def __init__(
@@ -548,38 +540,33 @@ class MergeAdditiveBlockKriging(Merge):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
         This function uses the full CML geometry and makes the gauge geometry
-        look like a rain gauge.
-
-        Parameters
-        ----------
-        da_rad: xarray.DataArray
-            Gridded radar data.
-            and ys.
-        da_cml: xarray.DataArray
-            CML observations.
-        da_gauge: xarray.DataArray
-            gauge observations.
+        appear as a rain gauge.
         """
         self.update_block_(
             da_rad, self.discretization, da_cml=da_cml, da_gauge=da_gauge
         )
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram=None):
+    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram='exponential'):
         """Adjust radar field for one time step.
 
-        Evaluates if we have enough observations to adjust the radar field.
-        Then adjust radar field to observations using additive IDW.
+        Adjust radar field for one time step. The function assumes that the
+        weights are updated using the update class method.
 
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data.
+            Gridded radar data. Must contain the lon and lat coordinates as
+            well as the projected coordinates xs and ys as a meshgrid.
         da_cml: xarray.DataArray
-            CML observations.
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            gauge observations.
-        variogram: function
-            Function returning expected variance given distance as input.
+            Gauge observations. Must contain the coordinates for the rain gauge
+            possitions (lat, lon) as well as the projected coordinates (x, y).
+        variogram: function or str
+            If function: Must return expected variance given distance between 
+            observations. If string: Must be a valid variogram type in pykrige.
 
         Returns
         -------
@@ -587,12 +574,9 @@ class MergeAdditiveBlockKriging(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        if variogram is None:
-            merge_functions.estimate_variogram()
-
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-
+        
         # Calculate radar-instrument difference if radar has observation
         diff = np.where(rad > 0, obs - rad, np.nan)
 
@@ -601,6 +585,13 @@ class MergeAdditiveBlockKriging(Merge):
 
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
+            # If variogram provided as string, estimate from ground obs.
+            if isinstance(variogram, str):
+                variogram = merge_functions.estimate_variogram(
+                    obs=diff[keep],
+                    x0=x0[keep],
+                )
+
             # get timestamp
             time = da_rad.time.data[0]
 
@@ -628,18 +619,9 @@ class MergeAdditiveBlockKriging(Merge):
 class MergeBlockKrigingExternalDrift(Merge):
     """Merge CML and radar using block-kriging with external drift.
 
-    Marges the provided radar field in ds_rad to CML observations by
-    interpolating the difference between the CML and radar observations using
-    block kriging.
-
-    Parameters
-    ----------
-    grid_location_radar: str
-        String indicating the grid location of the radar.
-    min_obs: int
-        Minimum number of unique observations needed in order to do adjustment.
-    discretization: int
-        Number of points to discretize the CML into.
+    Merges the provided radar field in ds_rad to CML and rain gauge
+    observations by using a block kriging variant of kriging with external
+    drift.
     """
 
     def __init__(
@@ -657,16 +639,7 @@ class MergeBlockKrigingExternalDrift(Merge):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
         This function uses the full CML geometry and makes the gauge geometry
-        look like a rain gauge.
-
-        Parameters
-        ----------
-        da_rad: xarray.DataArray
-            Gridded radar data.
-        da_cml: xarray.DataArray
-            CML observations.
-        da_gauge: xarray.DataArray
-            gauge observations.
+        appear as a rain gauge.
         """
         self.update_block_(
             da_rad, self.discretization, da_cml=da_cml, da_gauge=da_gauge
@@ -677,28 +650,38 @@ class MergeBlockKrigingExternalDrift(Merge):
         da_rad,
         da_cml=None,
         da_gauge=None,
-        variogram=None,
+        variogram='exponential',
         transform=None,
         backtransform=None,
     ):
         """Adjust radar field for one time step.
 
         Evaluates if we have enough observations to adjust the radar field.
-        Then adjust radar field to observations using additive IDW.
+        Then adjust radar field to observations using a block kriging variant
+        of kriging with external drift.
+
+        The function allows for the user to supply transformation,
+        backtransformation and variogram functions.
 
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data.
+            Gridded radar data. Must contain the lon and lat coordinates as
+            well as the projected coordinates xs and ys as a meshgrid.
         da_cml: xarray.DataArray
-            CML observations.
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            gauge observations.
-            Function returning expected variance given distance as input.
+            Gauge observations. Must contain the coordinates for the rain gauge
+            possitions (lat, lon) as well as the projected coordinates (x, y).
+        variogram: function
+            If function: Must return expected variance given distance between 
+            observations. If string: Must be a valid variogram type in pykrige.
         transform: function
-            Function transforming the data to follow a normal distribution.
+            Transform rainfall distribution to Gaussian distributed data
         backtransform: function
-            Function backtransforming the data from normal distribution.
+            Gaussian distributed data to rainfall distribution
 
         Returns
         -------
@@ -706,20 +689,27 @@ class MergeBlockKrigingExternalDrift(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        if variogram is None:
-            merge_functions.estimate_variogram()
-
-        if (transform is None) | (backtransform is None):
-            merge_functions.estimate_transformation()
-
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-
+        
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
-
+        
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
+            # If transformation functions not provided, estimate it from obs.
+            if (transform is None) | (backtransform is None):
+                transform, backtransform = merge_functions.estimate_transformation(
+                    obs=obs[keep],
+                )
+    
+            # If variogram provided as string, estimate from ground obs.
+            if isinstance(variogram, str):
+                variogram = merge_functions.estimate_variogram(
+                    obs=transform(obs[keep]),
+                    x0=x0[keep],
+                )
+
             # get timestamp
             time = da_rad.time.data[0]
 
@@ -734,12 +724,31 @@ class MergeBlockKrigingExternalDrift(Merge):
                 x0[keep],
                 variogram,
             )
+            
+            # Skip nan
+            mask = ~np.isnan(adjusted.data)
+            rank = adjusted.data
+            
+            # Rank-transform adjusted data, 'dense' allows for duplicate ranks     
+            rank[mask] = stats.rankdata(rank[mask], method='dense')
+            
+            # Transform to 0-1
+            rank = (rank - 1) / (rank.size - 1)
 
             # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(adjusted))
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(rank))
+                        
+            # import matplotlib.pyplot as plt 
+            # plt.imshow(rank)
+            # plt.colorbar()
+            # plt.show()
+            
+            # xx = np.linspace(0, 1, 100)
+            # plt.plot(xx, backtransform(xx))
+            # plt.show()
 
-            # Re-assign timestamp and return
-            return adjusted.assign_coords(time=time)
+            # # Re-assign timestamp and return
+            # return adjusted.assign_coords(time=time)
 
         # Else return the unadjusted radar
         return da_rad
