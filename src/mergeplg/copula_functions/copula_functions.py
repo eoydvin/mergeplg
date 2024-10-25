@@ -81,7 +81,6 @@ def calculate_copula(
     Wrapper function for copula / spatial dependence calculation
     """
 
-    t0_copula = datetime.datetime.now()
 
     # transform to rank values
     # erlend: this makes the distribution flat, like in the KDE, thus it can 
@@ -101,37 +100,20 @@ def calculate_copula(
     else:
         n_in_subset = 5
 
-        # calculate copula models
-    if mode == 'block':
-        cmods = paraest_multiple_tries(
-            np.copy(yx),
-            u,
-            ntries=[ntries, ntries],
-            n_in_subset=n_in_subset,
-            # number of values in subsets
-            neighbourhood="random", 
-            # subset search algorithm
-            outputfile=outputfile,
-            maxrange = maxrange,
-            minrange = minrange,
-            nugget = nugget,
-        )  # store all fitted models in an output file
-
-    else:
-    
-        cmods = paraest_multiple_tries(
-            np.copy(yx),
-            u,
-            ntries=[ntries, ntries],
-            n_in_subset=n_in_subset,
-            # number of values in subsets
-            neighbourhood="random",
-            # subset search algorithm
-            maxrange = maxrange,
-            minrange = minrange,        
-            covmods=[covmods],  # covariance functions
-            outputfile=outputfile,
-        )  # store all fitted models in an output file
+    # calculate copula models
+    cmods = paraest_multiple_tries(
+        np.copy(yx),
+        u,
+        ntries=[ntries, ntries],
+        n_in_subset=n_in_subset,
+        # number of values in subsets
+        neighbourhood="random",
+        # subset search algorithm
+        maxrange = maxrange,
+        minrange = minrange,        
+        covmods=[covmods],  # covariance functions
+        outputfile=outputfile,
+    )  # store all fitted models in an output file
 
     # take the copula model with the highest likelihood
     # reconstruct from parameter array
@@ -142,24 +124,15 @@ def calculate_copula(
                 likelihood = cmods[model][tries][1] * -1.0
                 #                 cmod = "0.05 Nug(0.0) + 0.95 %s(%1.3f)" % (
                 #                     covmods[model], cmods[model][tries][0][0])
-                
-                if covmods == 'exp':
-                    cmod = "%1.3f Nug(0.0) + %1.3f Exp(%1.3f)" % (
-                        nugget,
-                        1 - nugget,
-                        cmods[model][tries][0][0],
-                    )
-                elif covmods == 'nug exp':
-                    C = cmods[model][tries][0][1]
-                    cmod = "%1.3f Nug(0.0) + %1.3f Exp(%1.3f)" % (
-                        (1 - C),
-                        C,
-                        cmods[model][tries][0][0],
-                    )
+                cmod = "%1.3f Nug(0.0) + %1.3f %s(%1.3f)" % (
+                    nugget,
+                    1 - nugget,
+                    covmods[model],
+                    cmods[model][tries][0][0],
+                )
+                if covmods[model] == "Mat":
+                    cmod += "^%1.3f" % (cmods[model][tries][0][1])
 
-    t1_copula = datetime.datetime.now()
-    t_copula = t1_copula - t0_copula
-    t_copula = t_copula.total_seconds()
 
     return cmod
 
