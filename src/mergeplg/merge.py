@@ -535,6 +535,9 @@ class MergeAdditiveBlockKriging(Merge):
         # Number of discretization points along CML
         self.discretization = discretization
 
+        # For storing variogram parameters
+        self.variogram_param = None
+
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
@@ -586,10 +589,13 @@ class MergeAdditiveBlockKriging(Merge):
         if keep.size > self.min_obs_:
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
-                variogram = merge_functions.estimate_variogram(
-                    obs=diff[keep],
+                # Estimate variogram
+                param = merge_functions.estimate_variogram(
+                    obs=obs[keep],
                     x0=x0[keep],
                 )
+
+                variogram, self.variogram_param = param
 
             # get timestamp
             time = da_rad.time.data[0]
@@ -633,6 +639,12 @@ class MergeBlockKrigingExternalDrift(Merge):
 
         # Number of discretization points along CML
         self.discretization = discretization
+
+        # For storing pykrige variogram parameters
+        self.variogram_param = None
+
+        # For storing gamma parameters
+        self.gamma_param = None
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
@@ -698,16 +710,19 @@ class MergeBlockKrigingExternalDrift(Merge):
         if keep.size > self.min_obs_:
             # If transformation functions not provided, estimate it from obs.
             if (transform is None) | (backtransform is None):
-                transform, backtransform = merge_functions.estimate_transformation(
-                    obs=obs[keep],
-                )
+                # Estimate Gamma distribution
+                param = merge_functions.estimate_transformation(obs[keep])
+                transform, backtransform, self.gamma_param = param
 
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
-                variogram = merge_functions.estimate_variogram(
+                # Estimate variogram
+                param = merge_functions.estimate_variogram(
                     obs=transform(obs[keep]),
                     x0=x0[keep],
                 )
+
+                variogram, self.variogram_param = param
 
             # get timestamp
             time = da_rad.time.data[0]

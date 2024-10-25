@@ -488,7 +488,7 @@ def estimate_variogram(obs, x0, variogram_model="exponential"):
     def variogram(h):
         return ok.variogram_function(ok.variogram_model_parameters, h)
 
-    return variogram
+    return variogram, [ok.variogram_model_parameters, ok.variogram_function]
 
 
 def estimate_transformation(obs):
@@ -505,6 +505,8 @@ def estimate_transformation(obs):
     backtransformation: function
         Backtransformation function that transforms rainfall data from Gaussian
         distribution to Gamma distribution.
+    gamma_param: list
+        Parameters for the gamma distribution estimated from observations
     """
     # Estimate parameters of Gamma distribution
     k, loc, scale = stats.gamma.fit(obs)
@@ -517,4 +519,6 @@ def estimate_transformation(obs):
     def backtransformation(h):
         return stats.gamma(k, loc=loc, scale=scale).ppf(stats.norm(0, 1).cdf(h))
 
-    return transformation, backtransformation
+    gamma_param = [k, loc, scale]
+
+    return transformation, backtransformation, gamma_param
