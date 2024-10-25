@@ -43,11 +43,12 @@ poligrain = ">=0.1.0"
 scipy = ">=1.14.0"
 numpy = ">=2.0.1"
 pandas = ">=2.2.2"
-xarray = ">=2024.6.0"
+xarray = ">=2024.6.0,<2024.9.0"
 wradlib = ">=2.0.3"
 scikit-learn = ">=1.5.1"
 scikit-gstat = ">=1.0.17"
 numba = "*"
+xarray-datatree = "<=0.0.14"
 
 [tool.poetry.dev-dependencies]
 pytest = ">= 6"
