@@ -482,6 +482,9 @@ class MergeAdditiveIDW(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
+        # Update weights and x0 geometry for CML and gauge
+        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
@@ -576,6 +579,9 @@ class MergeAdditiveBlockKriging(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
+        # Update weights and x0 geometry for CML and gauge
+        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
@@ -700,6 +706,9 @@ class MergeBlockKrigingExternalDrift(Merge):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
+        # Update weights and x0 geometry for CML and gauge
+        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
