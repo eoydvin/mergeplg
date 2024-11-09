@@ -476,19 +476,29 @@ def estimate_variogram(obs, x0, variogram_model="exponential"):
     if len(x0.shape) > 2:
         x0 = x0[:, :, int(x0.shape[1] / 2)]
 
-    # Fit variogram using pykrige
-    ok = pykrige.OrdinaryKriging(
-        x0[:, 1],  # x coordinate
-        x0[:, 0],  # y coordinate
-        obs,
-        variogram_model=variogram_model,
-    )
+    try:
+        # Fit variogram using pykrige
+        ok = pykrige.OrdinaryKriging(
+            x0[:, 1],  # x coordinate
+            x0[:, 0],  # y coordinate
+            obs,
+            variogram_model=variogram_model,
+        )
+        
+        # construct variogram using pykrige
+        def variogram(h):
+            return ok.variogram_function(ok.variogram_model_parameters, h)
+        
+        # Return variogram and parameters
+        return variogram, [ok.variogram_model_parameters, ok.variogram_function]
+    
+    # If an error occurs just use a linear variogram
+    except:
+        def variogram(h):
+            return h    
 
-    # construct variogram using pykrige
-    def variogram(h):
-        return ok.variogram_function(ok.variogram_model_parameters, h)
-
-    return variogram, [ok.variogram_model_parameters, ok.variogram_function]
+        # Return the linear variogram
+        return variogram, [1, variogram]
 
 
 def estimate_transformation(obs):
