@@ -551,7 +551,14 @@ class MergeAdditiveBlockKriging(Merge):
             da_rad, self.discretization, da_cml=da_cml, da_gauge=da_gauge
         )
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram="exponential"):
+    def adjust(
+            self, 
+            da_rad, 
+            da_cml=None, 
+            da_gauge=None, 
+            variogram="exponential",
+            n_closest = 8
+        ):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -572,6 +579,8 @@ class MergeAdditiveBlockKriging(Merge):
         variogram: function or str
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
+        n_closest: int
+            Number of closest links to use for interpolation
 
         Returns
         -------
@@ -615,6 +624,7 @@ class MergeAdditiveBlockKriging(Merge):
                 diff[keep],
                 x0[keep, :],
                 variogram,
+                diff[keep].size - 1 if diff[keep].size <= n_closest else n_closest,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)

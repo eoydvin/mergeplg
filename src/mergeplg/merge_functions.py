@@ -78,7 +78,7 @@ def merge_additive_idw(da_rad, cml_diff, x0):
     return ds_rad_out.adjusted
 
 
-def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
+def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram, n_closest):
     """Merge CML and radar using an additive block kriging.
 
     Marges the provided radar field in ds_rad to CML observations by
@@ -98,6 +98,8 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     variogram: function
         A user defined python function defining the variogram. Takes a distance
         h and returns the expected variance.
+    n_closest: int
+        Number of closest links to use for interpolation
 
     Returns
     -------
@@ -123,10 +125,7 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
     mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
     mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
-
-    # Calc the inverse, only dependent on geometry
-    a_inv = np.linalg.pinv(mat)
-
+    
     # Skip radar pixels with np.nan
     mask = np.isnan(da_rad.data)
 
@@ -137,23 +136,30 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     estimate = np.zeros(xgrid_t.shape)
 
     # Compute the contributions from all CMLs to points in grid
-    for i in range(xgrid_t.size):
+    for i in range(xgrid_t.size):    
         # Compute lengths between all points along all links
         delta_x = x0[:, 1] - xgrid_t[i]
         delta_y = x0[:, 0] - ygrid_t[i]
         lengths = np.sqrt(delta_x**2 + delta_y**2)
-
+                
+        # Get the n closest links
+        indices = np.argpartition(lengths.min(axis = 1), n_closest)[:n_closest]
+        ind_mat = np.append(indices, mat.shape[0]-1)
+        
+        # Calc the inverse, only dependent on geometry
+        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
+        
         # Estimate expected variance for all links
-        target = variogram(lengths).mean(axis=1)
-
+        target = variogram(lengths[indices]).mean(axis=1)
+    
         # Add non bias condition
         target = np.append(target, 1)
-
+    
         # Compute the kriging weights
         w = (a_inv @ target)[:-1]
-
+    
         # Estimate rainfall amounts at location i
-        estimate[i] = cml_diff @ w
+        estimate[i] = cml_diff[indices] @ w
 
     # Store shift values
     shift[~mask] = estimate
