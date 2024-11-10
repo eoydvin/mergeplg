@@ -678,8 +678,7 @@ class MergeBlockKrigingExternalDrift(Merge):
         da_cml=None,
         da_gauge=None,
         variogram="exponential",
-        transform=None,
-        backtransform=None,
+        n_closest = 8
     ):
         """Adjust radar field for one time step.
 
@@ -705,11 +704,9 @@ class MergeBlockKrigingExternalDrift(Merge):
         variogram: function
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
-        transform: function
-            Transform rainfall distribution to Gaussian distributed data
-        backtransform: function
-            Gaussian distributed data to rainfall distribution
-
+        n_closest: int
+            Number of closest links to use for interpolation
+            
         Returns
         -------
         da_rad_out: xarray.DataArray
@@ -727,17 +724,11 @@ class MergeBlockKrigingExternalDrift(Merge):
 
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
-            # If transformation functions not provided, estimate it from obs.
-            if (transform is None) | (backtransform is None):
-                # Estimate Gamma distribution
-                param = merge_functions.estimate_transformation(obs[keep])
-                transform, backtransform, self.gamma_param = param
-
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
                 # Estimate variogram
                 param = merge_functions.estimate_variogram(
-                    obs=transform(obs[keep]),
+                    obs=obs[keep],
                     x0=x0[keep],
                 )
 
@@ -753,13 +744,14 @@ class MergeBlockKrigingExternalDrift(Merge):
             adjusted = merge_functions.merge_ked_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 rad[keep],
-                transform(obs)[keep],
+                obs[keep],
                 x0[keep],
                 variogram,
+                obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(adjusted))
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
 
             # Re-assign timestamp and return
             return adjusted.assign_coords(time=time)
