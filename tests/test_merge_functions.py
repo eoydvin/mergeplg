@@ -174,12 +174,15 @@ def test_merge_additive_blockkriging():
     def variogram(h):  # Exponential variogram
         return 0 + (1 - 0) * (1 - np.exp(-h * 3 / 1))
 
+    n_obs = ds_cmls.R_diff.isel(time=0).data.size
+
     # do additive blockkriging
     additive_blockkriging = merge_functions.merge_additive_blockkriging(
         ds_rad.R.isel(time=0),
         ds_cmls.R_diff.isel(time=0).data,
         x0,
         variogram,
+        n_obs - 1 if n_obs <= 8 else 8,
     )
 
     # Is not strightforward to check the line integrals as the discretization
@@ -187,10 +190,10 @@ def test_merge_additive_blockkriging():
     # against a copy for now.
     data_check = np.array(
         [
-            [0.74051841, 3.21147242, 4.6111765, 5.00452548],
-            [3.64729524, 0.0, 4.32792689, 9.03586299],
-            [4.73805877, 4.90689486, 6.62686948, 5.41754889],
-            [5.02525927, 9.16274526, 5.85337171, 4.92628948],
+            [1.1007268, 4.4315058, 3.4856829, 7.0209609],
+            [2.4789288, 0.8917858, 5.1082142, 8.6748483],
+            [4.9256465, 5.0, 6.421814, 5.3251517],
+            [5.2115603, 9.1025073, 5.9828137, 3.0836016],
         ]
     )
 
@@ -215,6 +218,8 @@ def test_merge_ked_blockkriging():
     def variogram(h):  # Exponential variogram
         return 0 + (1 - 0) * (1 - np.exp(-h * 3 / 1))
 
+    n_obs = ds_cmls.R_diff.isel(time=0).data.size
+
     # do additive blockkriging
     ked = merge_functions.merge_ked_blockkriging(
         ds_rad.R.isel(time=0),
@@ -222,6 +227,7 @@ def test_merge_ked_blockkriging():
         ds_cmls.R.isel(time=0).data,
         x0,
         variogram,
+        n_obs - 1 if n_obs <= 8 else 8,
     )
 
     # Is not strightforward to check the line integrals as the discretization
@@ -229,10 +235,10 @@ def test_merge_ked_blockkriging():
     # against a copy for now.
     data_check = np.array(
         [
-            [0.74051841, 3.21147242, 4.6111765, 5.00452548],
-            [3.64729524, -0.51458688, 4.32792689, 9.03586299],
-            [4.73805877, 4.90689486, 6.62686948, 5.41754889],
-            [5.02525927, 9.16274526, 5.85337171, 4.92628948],
+            [1.1007268, 4.4315058, 3.4856829, 7.0209609],
+            [2.4789288, 0.8917858, 5.1082142, 8.6748483],
+            [4.9256465, 5.0, 6.421814, 5.3251517],
+            [5.2115603, 9.1025073, 5.9828137, 3.0836016],
         ]
     )
 
