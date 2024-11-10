@@ -552,13 +552,8 @@ class MergeAdditiveBlockKriging(Merge):
         )
 
     def adjust(
-            self, 
-            da_rad, 
-            da_cml=None, 
-            da_gauge=None, 
-            variogram="exponential",
-            n_closest = 8
-        ):
+        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
+    ):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -673,12 +668,7 @@ class MergeBlockKrigingExternalDrift(Merge):
         )
 
     def adjust(
-        self,
-        da_rad,
-        da_cml=None,
-        da_gauge=None,
-        variogram="exponential",
-        n_closest = 8
+        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
     ):
         """Adjust radar field for one time step.
 
@@ -706,7 +696,7 @@ class MergeBlockKrigingExternalDrift(Merge):
             observations. If string: Must be a valid variogram type in pykrige.
         n_closest: int
             Number of closest links to use for interpolation
-            
+
         Returns
         -------
         da_rad_out: xarray.DataArray
