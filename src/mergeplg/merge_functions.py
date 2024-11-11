@@ -8,10 +8,13 @@ import numpy as np
 import pykrige
 import xarray as xr
 from scipy import stats
-from sklearn.neighbors import KNeighborsRegressor
+
+from .radolan import idw
 
 
-def merge_additive_idw(da_rad, cml_diff, x0):
+def merge_additive_idw(
+    da_rad, cml_diff, x0, p=2, idw_method="radolan", nnear=8, max_distance=60000
+):
     """Merge CML and radar using an additive approach and the CML midpoint.
 
     Merges the CML and radar field by interpolating the difference between
@@ -26,6 +29,14 @@ def merge_additive_idw(da_rad, cml_diff, x0):
     x0: numpy.array
         Coordinates of CML midpoints given as [[cml_1_y, cml_1_x], ..
         [cml_n_y, cml_n_x] using the same order as cml_diff.
+    p: float
+        IDW interpolation parameter
+    idw_method: str
+        by default "radolan"
+    nnear: int
+        number of neighbours to use for interpolation
+    max_distance: float
+        max distance allowed interpolation distance
 
     Returns
     -------
@@ -49,14 +60,17 @@ def merge_additive_idw(da_rad, cml_diff, x0):
             [ygrid[~mask].reshape(-1, 1), xgrid[~mask].reshape(-1, 1)]
         )
 
-        # IDW interpolator kdtree, only supports IDW p=1
-        idw_interpolator = KNeighborsRegressor(
-            n_neighbors=cml_diff.size if cml_diff.size <= 8 else 8,
-            weights="distance",  # Use distance for setting weights
+        # IDW interpolator invdisttree
+        idw_interpolator = idw.Invdisttree(x0)
+        estimate = idw_interpolator(
+            q=coord_pred,
+            z=cml_diff,
+            nnear=cml_diff.size if cml_diff.size <= nnear else nnear,
+            p=p,
+            idw_method=idw_method,
+            max_distance=max_distance,
         )
-        idw_interpolator.fit(x0, cml_diff)
 
-        estimate = idw_interpolator.predict(coord_pred)
         shift[~mask] = estimate
 
     # create xarray object similar to ds_rad

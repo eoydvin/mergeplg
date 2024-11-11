@@ -457,7 +457,16 @@ class MergeAdditiveIDW(Merge):
         """
         self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None):
+    def adjust(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        p=2,
+        idw_method="radolan",
+        nnear=8,
+        max_distance=60000,
+    ):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -475,6 +484,14 @@ class MergeAdditiveIDW(Merge):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
             positions (lat, lon) as well as the projected coordinates (x, y).
+        p: float
+            IDW interpolation parameter
+        idw_method: str
+            by default "radolan"
+        nnear: int
+            number of neighbours to use for interpolation
+        max_distance: float
+            max distance allowed interpolation distance
 
         Returns
         -------
@@ -507,6 +524,10 @@ class MergeAdditiveIDW(Merge):
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 diff[keep],
                 x0[keep, :],
+                p=p,
+                idw_method=idw_method,
+                nnear=nnear,
+                max_distance=max_distance,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)
