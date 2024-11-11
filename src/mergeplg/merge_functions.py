@@ -8,10 +8,13 @@ import numpy as np
 import pykrige
 import xarray as xr
 from scipy import stats
-from sklearn.neighbors import KNeighborsRegressor
+
+from .radolan import idw
 
 
-def merge_additive_idw(da_rad, cml_diff, x0):
+def merge_additive_idw(
+    da_rad, cml_diff, x0, p=2, idw_method="radolan", nnear=8, max_distance=60000
+):
     """Merge CML and radar using an additive approach and the CML midpoint.
 
     Merges the CML and radar field by interpolating the difference between
@@ -26,6 +29,14 @@ def merge_additive_idw(da_rad, cml_diff, x0):
     x0: numpy.array
         Coordinates of CML midpoints given as [[cml_1_y, cml_1_x], ..
         [cml_n_y, cml_n_x] using the same order as cml_diff.
+    p: float
+        IDW interpolation parameter
+    idw_method: str
+        by default "radolan"
+    nnear: int
+        number of neighbours to use for interpolation
+    max_distance: float
+        max distance allowed interpolation distance
 
     Returns
     -------
@@ -49,14 +60,17 @@ def merge_additive_idw(da_rad, cml_diff, x0):
             [ygrid[~mask].reshape(-1, 1), xgrid[~mask].reshape(-1, 1)]
         )
 
-        # IDW interpolator kdtree, only supports IDW p=1
-        idw_interpolator = KNeighborsRegressor(
-            n_neighbors=cml_diff.size if cml_diff.size <= 8 else 8,
-            weights="distance",  # Use distance for setting weights
+        # IDW interpolator invdisttree
+        idw_interpolator = idw.Invdisttree(x0)
+        estimate = idw_interpolator(
+            q=coord_pred,
+            z=cml_diff,
+            nnear=cml_diff.size if cml_diff.size <= nnear else nnear,
+            p=p,
+            idw_method=idw_method,
+            max_distance=max_distance,
         )
-        idw_interpolator.fit(x0, cml_diff)
 
-        estimate = idw_interpolator.predict(coord_pred)
         shift[~mask] = estimate
 
     # create xarray object similar to ds_rad
@@ -78,7 +92,7 @@ def merge_additive_idw(da_rad, cml_diff, x0):
     return ds_rad_out.adjusted
 
 
-def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
+def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram, n_closest):
     """Merge CML and radar using an additive block kriging.
 
     Marges the provided radar field in ds_rad to CML observations by
@@ -98,6 +112,8 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     variogram: function
         A user defined python function defining the variogram. Takes a distance
         h and returns the expected variance.
+    n_closest: int
+        Number of closest links to use for interpolation
 
     Returns
     -------
@@ -124,9 +140,6 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
     mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
 
-    # Calc the inverse, only dependent on geometry
-    a_inv = np.linalg.pinv(mat)
-
     # Skip radar pixels with np.nan
     mask = np.isnan(da_rad.data)
 
@@ -143,8 +156,15 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
         delta_y = x0[:, 0] - ygrid_t[i]
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
+        # Get the n closest links
+        indices = np.argpartition(lengths.min(axis=1), n_closest)[:n_closest]
+        ind_mat = np.append(indices, mat.shape[0] - 1)
+
+        # Calc the inverse, only dependent on geometry
+        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
+
         # Estimate expected variance for all links
-        target = variogram(lengths).mean(axis=1)
+        target = variogram(lengths[indices]).mean(axis=1)
 
         # Add non bias condition
         target = np.append(target, 1)
@@ -153,7 +173,7 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
         w = (a_inv @ target)[:-1]
 
         # Estimate rainfall amounts at location i
-        estimate[i] = cml_diff @ w
+        estimate[i] = cml_diff[indices] @ w
 
     # Store shift values
     shift[~mask] = estimate
@@ -177,7 +197,7 @@ def merge_additive_blockkriging(da_rad, cml_diff, x0, variogram):
     return ds_rad_out.adjusted_rainfall
 
 
-def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram):
+def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram, n_closest):
     """Merge CML and radar using an additive block kriging.
 
     Marges the provided radar field in ds_rad to CML observations by
@@ -199,6 +219,8 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram):
     variogram: function
         A user defined python function defining the variogram. Takes a distance
         h and returns the expected variance.
+    n_closest: int
+        Number of closest links to use for interpolation
 
     Returns
     -------
@@ -225,9 +247,6 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram):
     mat[:-2, -2] = np.ones(cov_block.shape[0])  # lagrange multipliers
     mat[:-2, -1] = cml_rad  # Radar drift
 
-    # Calc the inverse, only dependent on geometry (and radar for KED)
-    a_inv = np.linalg.pinv(mat)
-
     # Skip radar pixels with np.nan
     mask = np.isnan(da_rad.data)
 
@@ -245,7 +264,14 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram):
         delta_y = x0[:, 0] - ygrid_t[i]
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
-        target = variogram(lengths).mean(axis=1)
+        # Get the n closest links
+        indices = np.argpartition(lengths.min(axis=1), n_closest)[:n_closest]
+        ind_mat = np.append(indices, [mat.shape[0] - 2, mat.shape[0] - 1])
+
+        # Calc the inverse, only dependent on geometry
+        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
+
+        target = variogram(lengths[indices]).mean(axis=1)
 
         target = np.append(target, 1)  # non bias condition
         target = np.append(target, rad_field_t[i])  # radar value
@@ -254,7 +280,7 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram):
         w = (a_inv @ target)[:-2]
 
         # its then the sum of the CML values (eq 8, see paragraph after eq 15)
-        estimate[i] = cml_obs @ w
+        estimate[i] = cml_obs[indices] @ w
 
     rain[~mask] = estimate
 
@@ -476,19 +502,30 @@ def estimate_variogram(obs, x0, variogram_model="exponential"):
     if len(x0.shape) > 2:
         x0 = x0[:, :, int(x0.shape[1] / 2)]
 
-    # Fit variogram using pykrige
-    ok = pykrige.OrdinaryKriging(
-        x0[:, 1],  # x coordinate
-        x0[:, 0],  # y coordinate
-        obs,
-        variogram_model=variogram_model,
-    )
+    try:
+        # Fit variogram using pykrige
+        ok = pykrige.OrdinaryKriging(
+            x0[:, 1],  # x coordinate
+            x0[:, 0],  # y coordinate
+            obs,
+            variogram_model=variogram_model,
+        )
 
-    # construct variogram using pykrige
-    def variogram(h):
-        return ok.variogram_function(ok.variogram_model_parameters, h)
+        # construct variogram using pykrige
+        def variogram(h):
+            return ok.variogram_function(ok.variogram_model_parameters, h)
 
-    return variogram, [ok.variogram_model_parameters, ok.variogram_function]
+        # Return variogram and parameters
+        return variogram, [ok.variogram_model_parameters, ok.variogram_function]
+
+    # If an error occurs just use a linear variogram
+    except ValueError:
+
+        def variogram(h):
+            return h
+
+        # Return the linear variogram
+        return variogram, [1, variogram]
 
 
 def estimate_transformation(obs):

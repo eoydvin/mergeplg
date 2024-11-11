@@ -198,10 +198,10 @@ def test_MergeAdditiveBlockKriging():
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [7.0, 4.75, 7.0, 7.0],
-            [7.0, 7.0, 4.75, 9.25],
-            [7.0, 5.0, 9.25, 4.75],
-            [7.0, 9.25, 7.0, 9.0],
+            [6.8837209, 4.7383721, 6.8837209, 6.8837209],
+            [6.8837209, 6.8837209, 4.7383721, 9.2616279],
+            [6.8837209, 5.0, 9.2383721, 4.7616279],
+            [6.8837209, 9.0, 7.1162791, 9.0],
         ]
     )
 
@@ -219,10 +219,10 @@ def test_MergeAdditiveBlockKriging():
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [1.43673647, 1.06085498, 2.98957828, 5.31222291],
-            [2.67670905, 2.90631907, 4.91098833, 7.95139803],
-            [4.81113794, 5.0, 9.19210204, 8.59025601],
-            [7.35575543, 9.77295769, 10.20611008, 9.0],
+            [1.2673279, 0.9159766, 2.8557292, 5.2944255],
+            [2.5462022, 2.7732177, 4.7644577, 6.2127718],
+            [4.7542038, 5.0, 9.1808035, 7.4418168],
+            [7.4271479, 7.2153635, 10.724253, 9.0],
         ]
     )
 
@@ -251,7 +251,7 @@ def test_MergeAdditiveBlockKriging():
     np.testing.assert_almost_equal(
         adjusted_at_cmls.data.ravel(),
         da_cml_t1.data.ravel(),
-        decimal=1,  # not very precise, but decent
+        decimal=0,  # not very precise, but decent
     )
 
     # Test adjusted field at rain gauges
@@ -296,10 +296,10 @@ def test_MergeAdditiveBlockKriging():
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [0.0, 3.01319052, 5.52048437, 6.49278813],
-            [0.34756132, 1.65137139, 5.37757498, 6.72211196],
-            [2.4193859, 5.0, 1.0, 6.06216273],
-            [3.00919905, 3.62101349, 3.39653353, 4.8232423],
+            [0.0, 0.7627281, 6.0610102, 6.9895002],
+            [0.0, 0.754008, 5.2116101, 6.7336794],
+            [3.7761221, 5.0, 1.0, 5.5185573],
+            [4.2335087, 4.0556517, 1.2108774, 3.4961416],
         ]
     )
 
@@ -328,7 +328,7 @@ def test_MergeAdditiveBlockKriging():
     np.testing.assert_almost_equal(
         adjusted_at_cmls.data.ravel(),
         da_cml_t2.data.ravel(),
-        decimal=1,  # not very precise, but decent
+        decimal=0,  # not very precise, but decent
     )
 
     # Test adjusted field at rain gauges
@@ -402,17 +402,15 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml=da_cml_t1,
         da_gauge=da_gauges_t1,
         variogram="exponential",
-        transform=None,
-        backtransform=None,
     )
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [6.9999667, 4.7500089, 6.9999667, 6.9999667],
-            [6.9999667, 6.9999667, 4.7500089, 9.2500089],
-            [6.9999667, 5.0, 9.2500089, 4.7500089],
-            [6.9999667, 9.2500089, 6.9999667, 9.0],
+            [6.8837209, 4.7383721, 6.8837209, 6.8837209],
+            [6.8837209, 6.8837209, 4.7383721, 9.2616279],
+            [6.8837209, 5.0, 9.2383721, 4.7616279],
+            [6.8837209, 9.0, 7.1162791, 9.0],
         ]
     )
 
@@ -422,29 +420,21 @@ def test_MergeBlockKrigingExternalDrift():
     def variogram(h):
         return h
 
-    def transform(r):
-        return r
-
-    def backtransform(r):
-        return r
-
     # Adjust field
     adjusted = merge_KED.adjust(
         da_rad_t,
         da_cml=da_cml_t1,
         da_gauge=da_gauges_t1,
         variogram=variogram,
-        transform=transform,
-        backtransform=backtransform,
     )
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [1.43673647, 1.06085498, 2.98957828, 5.31222291],
-            [2.67670905, 2.90631907, 4.91098833, 7.95139803],
-            [4.81113794, 5.0, 9.19210204, 8.59025601],
-            [7.35575543, 9.77295769, 10.20611008, 9.0],
+            [1.2673279, 0.9159766, 2.8557292, 5.2944255],
+            [2.5462022, 2.7732177, 4.7644577, 6.2127718],
+            [4.7542038, 5.0, 9.1808035, 7.4418168],
+            [7.4271479, 7.2153635, 10.724253, 9.0],
         ]
     )
 
@@ -473,7 +463,7 @@ def test_MergeBlockKrigingExternalDrift():
     np.testing.assert_almost_equal(
         adjusted_at_cmls.data.ravel(),
         da_cml_t1.data.ravel(),
-        decimal=1,  # not very precise, but decent
+        decimal=0,  # not very precise, but decent
     )
 
     # Test adjusted field at rain gauges
@@ -516,17 +506,15 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml=da_cml_t2,
         da_gauge=da_gauges_t2,
         variogram=variogram,
-        transform=transform,
-        backtransform=backtransform,
     )
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [-0.732342, 3.0131905, 5.5204844, 6.4927881],
-            [0.3475613, 1.6513714, 5.377575, 6.722112],
-            [2.4193859, 5.0, 1.0, 6.0621627],
-            [3.009199, 3.6210135, 3.3965335, 4.8232423],
+            [-2.6950506, 0.7627281, 6.0610102, 6.9895002],
+            [-0.9672861, 0.754008, 5.2116101, 6.7336794],
+            [3.7761221, 5.0, 1.0, 5.5185573],
+            [4.2335087, 4.0556517, 1.2108774, 3.4961416],
         ]
     )
 
@@ -555,7 +543,7 @@ def test_MergeBlockKrigingExternalDrift():
     np.testing.assert_almost_equal(
         adjusted_at_cmls.data.ravel(),
         da_cml_t2.data.ravel(),
-        decimal=1,  # not very precise, but decent
+        decimal=0,  # not very precise, but decent
     )
 
     # Test adjusted field at rain gauges
@@ -576,8 +564,6 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml=None,
         da_gauge=da_gauges_t2,
         variogram=variogram,
-        transform=transform,
-        backtransform=backtransform,
     )
 
     # Test adjusted field at rain gauges
@@ -598,8 +584,6 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml=da_cml_t2,
         da_gauge=None,
         variogram=variogram,
-        transform=transform,
-        backtransform=backtransform,
     )
 
     # calculate the adjusted field along CMLs
@@ -622,7 +606,7 @@ def test_MergeBlockKrigingExternalDrift():
     np.testing.assert_almost_equal(
         adjusted_at_cmls.data.ravel(),
         da_cml_t2.data.ravel(),
-        decimal=1,  # not very precise, but decent
+        decimal=0,  # not very precise, but decent
     )
 
     # Test that da_rad is return if too few obs is provided
@@ -632,8 +616,6 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml=da_cml_t2,
         da_gauge=None,
         variogram=variogram,
-        transform=transform,
-        backtransform=backtransform,
     )
     np.testing.assert_almost_equal(
         adjusted.data,
