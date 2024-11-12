@@ -8,6 +8,9 @@ import numpy as np
 import pykrige
 import xarray as xr
 from scipy import stats
+from scipy.stats import norm, multivariate_normal, rankdata
+from sklearn.cluster import KMeans
+
 
 from .radolan import idw
 
@@ -290,6 +293,147 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram, n_closest):
     ds_rad_out["adjusted_rainfall"] = (("y", "x"), rain)
     return ds_rad_out.adjusted_rainfall
 
+def merge_cluster_copula(da_rad, cml_rad, cml_obs, x0, n_closest):
+    """Merge CML and radar using a copula model
+
+    Marges the provided radar field in ds_rad to CML observations by
+    interpolating the difference between the CML and radar observations using
+    a copula and a cluster algorithm. Uses the midpoints of the links
+
+    Parameters
+    ----------
+    ds_rad: xarray.DataArray
+        Gridded radar data. Must contain the x and y meshgrid given as xs
+        and ys.
+    cml_rad: numpy array
+        Radar observations at the CML locations.
+    cml_obs: numpy.array
+        CML observations.
+    x0: numpy.array
+        Coordinates of CML midpoints given as [[cml_1_y, cml_1_x], ..
+        [cml_n_y, cml_n_x] using the same order as cml_diff.
+    n_closest: int
+        Number of closest links to use for interpolation
+
+    Returns
+    -------
+    da_rad_out: xarray.DataArray
+        DataArray with the same structure as the ds_rad but with the CML
+        adjusted radar field.
+
+    """
+    # Grid coordinates
+    xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
+    
+    # Radar field as numpy
+    radar = da_rad.data
+
+    # Array for storing interpolated values
+    rain = np.full(xgrid.shape, np.nan)
+
+    # Skip radar pixels with np.nan
+    mask = ~np.isnan(da_rad.data)
+        
+    # Create designmatrix for CML and radar observations
+    X = np.hstack([cml_rad.reshape(-1, 1), (cml_obs - cml_rad).reshape(-1, 1)])
+    
+    # create kmeans object
+    kmeans = KMeans(n_clusters=7)
+    
+    # fit kmeans object to data
+    kmeans.fit(X)
+    
+    # Predict clusters on self
+    cluster = kmeans.predict(X)
+    
+    predicted_cml_field = np.zeros([
+        np.unique(cluster).size, 
+        xgrid.shape[0], 
+        xgrid.shape[1]
+    ])
+    
+    for j in range(np.unique(cluster).size):
+        # Convert to uniform using rankdata
+        uniform_obs_radar = rankdata(cml_rad[cluster == j]) / (len(cml_rad[cluster == j]) + 1)
+        uniform_obs_cml = rankdata(cml_obs[cluster == j]) / (len(cml_obs[cluster == j]) + 1)
+                
+        # Convert uniform data to Gaussian copula data
+        gaussian_obs_radar = norm.ppf(uniform_obs_radar)
+        gaussian_obs_cml = norm.ppf(uniform_obs_cml)
+        
+        # Compute the means and standard deviations
+        mean_radar = np.mean(gaussian_obs_radar)
+        mean_cml = np.mean(gaussian_obs_cml)
+        std_radar = np.std(gaussian_obs_radar)
+        std_cml = np.std(gaussian_obs_cml)
+        
+        # Compute the correlation coefficient
+        corr_coeff = np.corrcoef(gaussian_obs_radar, gaussian_obs_cml)[0, 1]
+                
+        # Rank transform radar field
+        uniform_radar_field = rankdata(radar[mask].ravel()) / (len(radar[mask].ravel()) + 1)
+                
+        # Convert uniform radar field data to Gaussian 
+        gaussian_radar_field = norm.ppf(uniform_radar_field)
+        
+        from time import sleep
+        sleep(1)
+        print(np.corrcoef(gaussian_obs_radar, gaussian_obs_cml))
+        print(uniform_obs_radar.size)
+        print(mean_radar, mean_cml)
+        print(std_radar, std_cml)
+        print(corr_coeff)
+        print(std_cml / std_radar) 
+        print('#    ')
+        
+
+        # If all values are the same or if corr_coeff is nan, assume perfect correalton (1)
+        if np.isnan(corr_coeff) | (std_radar == 0):
+            adjusted_field = mean_cml + (gaussian_radar_field - mean_radar)
+        else:
+            adjusted_field = mean_cml + corr_coeff * (std_cml / std_radar) * (gaussian_radar_field - mean_radar)
+
+        # Convert Gaussian copula data to cdf data
+        uniform_adjusted_cml_field = norm.cdf(adjusted_field)
+        
+        if np.isnan(uniform_adjusted_cml_field).any():
+            pred_ = radar[mask]
+        else:
+            pred_ = np.quantile(cml_obs[cluster == j], uniform_adjusted_cml_field)
+
+        predicted_cml_field[j][mask] = pred_
+        
+    # Select best field based on nearest cluster IDW
+    for i in range(xgrid.shape[0]):
+        for j in range(xgrid.shape[1]):
+            x = xgrid[i, j]
+            y = ygrid[i, j]
+            
+            dist = np.sqrt((x - x0[:, 1])**2 + (y - x0[:, 0])**2)
+            n_smallest_indices = np.argpartition(dist, n_closest)[:n_closest]
+            
+            # IDW
+            w = 1/(dist[n_smallest_indices])
+            w = w/sum(w)
+            
+            # Do weight by distance aswell?
+            rain[i, j] = predicted_cml_field[cluster[n_smallest_indices], i, j]@w
+
+    
+    # create xarray object similar to ds_rad
+    ds_rad_out = da_rad.rename("R").to_dataset().copy()
+
+    # Set areas with nan to zero
+    rain[np.isnan(rain)] = 0
+
+    # Set negative values to zero
+    rain = np.where(rain > 0, rain, 0)
+
+    # Store shift data
+    ds_rad_out["adjusted_rainfall"] = (("y", "x"), rain)
+
+    # Return dataset with adjusted values
+    return ds_rad_out.adjusted_rainfall
 
 def block_points_to_lengths(x0):
     """Calculate the lengths between all discretized points along all CMLs.
