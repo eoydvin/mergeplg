@@ -457,7 +457,16 @@ class MergeAdditiveIDW(Merge):
         """
         self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None):
+    def adjust(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        p=2,
+        idw_method="radolan",
+        nnear=8,
+        max_distance=60000,
+    ):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -475,6 +484,14 @@ class MergeAdditiveIDW(Merge):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
             positions (lat, lon) as well as the projected coordinates (x, y).
+        p: float
+            IDW interpolation parameter
+        idw_method: str
+            by default "radolan"
+        nnear: int
+            number of neighbours to use for interpolation
+        max_distance: float
+            max distance allowed interpolation distance
 
         Returns
         -------
@@ -507,6 +524,10 @@ class MergeAdditiveIDW(Merge):
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 diff[keep],
                 x0[keep, :],
+                p=p,
+                idw_method=idw_method,
+                nnear=nnear,
+                max_distance=max_distance,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)
@@ -551,7 +572,9 @@ class MergeAdditiveBlockKriging(Merge):
             da_rad, self.discretization, da_cml=da_cml, da_gauge=da_gauge
         )
 
-    def adjust(self, da_rad, da_cml=None, da_gauge=None, variogram="exponential"):
+    def adjust(
+        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
+    ):
         """Adjust radar field for one time step.
 
         Adjust radar field for one time step. The function assumes that the
@@ -572,6 +595,8 @@ class MergeAdditiveBlockKriging(Merge):
         variogram: function or str
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
+        n_closest: int
+            Number of closest links to use for interpolation
 
         Returns
         -------
@@ -615,6 +640,7 @@ class MergeAdditiveBlockKriging(Merge):
                 diff[keep],
                 x0[keep, :],
                 variogram,
+                diff[keep].size - 1 if diff[keep].size <= n_closest else n_closest,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)
@@ -663,13 +689,7 @@ class MergeBlockKrigingExternalDrift(Merge):
         )
 
     def adjust(
-        self,
-        da_rad,
-        da_cml=None,
-        da_gauge=None,
-        variogram="exponential",
-        transform=None,
-        backtransform=None,
+        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
     ):
         """Adjust radar field for one time step.
 
@@ -695,10 +715,8 @@ class MergeBlockKrigingExternalDrift(Merge):
         variogram: function
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
-        transform: function
-            Transform rainfall distribution to Gaussian distributed data
-        backtransform: function
-            Gaussian distributed data to rainfall distribution
+        n_closest: int
+            Number of closest links to use for interpolation
 
         Returns
         -------
@@ -717,17 +735,11 @@ class MergeBlockKrigingExternalDrift(Merge):
 
         # Check that that there is enough observations
         if keep.size > self.min_obs_:
-            # If transformation functions not provided, estimate it from obs.
-            if (transform is None) | (backtransform is None):
-                # Estimate Gamma distribution
-                param = merge_functions.estimate_transformation(obs[keep])
-                transform, backtransform, self.gamma_param = param
-
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
                 # Estimate variogram
                 param = merge_functions.estimate_variogram(
-                    obs=transform(obs[keep]),
+                    obs=obs[keep],
                     x0=x0[keep],
                 )
 
@@ -743,13 +755,14 @@ class MergeBlockKrigingExternalDrift(Merge):
             adjusted = merge_functions.merge_ked_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 rad[keep],
-                transform(obs)[keep],
+                obs[keep],
                 x0[keep],
                 variogram,
+                obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
             )
 
             # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, backtransform(adjusted))
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
 
             # Re-assign timestamp and return
             return adjusted.assign_coords(time=time)
