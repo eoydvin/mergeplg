@@ -54,6 +54,9 @@ class Merge:
         # Init weights CML and names
         self.intersect_weights = None
 
+        # Names of gauges, used for checking changes to rain gauges
+        self.gauge_ids = None
+
         # Init gauge positions and names
         self.get_grid_at_points = None
 
@@ -61,8 +64,85 @@ class Merge:
         self.x0_gauge = None
         self.x0_cml = None
 
-    def update_(self, da_rad, da_cml=None, da_gauge=None):
-        """Update weights and x0 geometry for CML and gauge
+    def update_x0_(self, da_cml=None, da_gauge=None):
+        """Update x0 geometry for CML and gauge
+
+        This function uses the midpoint of the CML as CML reference.
+
+        Parameters
+        ----------
+        da_cml: xarray.DataArray
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected midpoint coordinates (x, y).
+        da_gauge: xarray.DataArray
+            Gauge observations. Must contain the coordinates for the rain gauge
+            positions (lat, lon) as well as the projected coordinates (x, y).
+        """
+        # Check that there is radar or gauge data, if not raise an error
+        if (da_cml is None) and (da_gauge is None):
+            msg = "Please provide cml or gauge data"
+            raise ValueError(msg)
+
+        # If CML is present
+        if da_cml is not None:
+            # If intersect weights not computed, compute all weights
+            if self.x0_cml is None:
+                # Calculate CML midpoints
+                self.x0_cml = merge_functions.calculate_cml_midpoint(da_cml)
+
+            # Update weights, reusing already computed weights
+            else:
+                # New cml names
+                cml_id_new = np.sort(da_cml.cml_id.data)
+
+                # cml names of previous update
+                cml_id_old = np.sort(self.x0_cml.cml_id.data)
+
+                # Identify cml_id that is in the new and old array
+                cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
+
+                # Slice stored CML midpoints, keeping only new ones
+                self.x0_cml = self.x0_cml.sel(cml_id=cml_id_keep)
+
+                # Identify new cml_id
+                cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
+
+                # If new cml_ids available
+                if cml_id_not_in_old.size > 0:
+                    # Slice da_cml to get only missing coords
+                    da_cml_add = da_cml.sel(cml_id=cml_id_not_in_old)
+
+                    # Calculate CML midpoint for new CMLs
+                    x0_cml_add = merge_functions.calculate_cml_midpoint(da_cml_add)
+
+                    # Add to existing x0
+                    self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
+
+            # Update final x0_cml
+            self.x0_cml = self.x0_cml.sel(cml_id=da_cml.cml_id.data)
+
+        # If gauge data is present
+        if da_gauge is not None:
+            # If this is the first update
+            if self.x0_gauge is None:
+                # Calculate gauge coordinates
+                self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
+
+            else:
+                # Get names of new gauges
+                gauge_id_new = da_gauge.id.data
+
+                # Get names of gauges in previous update
+                gauge_id_old = self.x0_gauge.id.data
+
+                # Check that equal, element order is important
+                if not np.array_equal(gauge_id_new, gauge_id_old):
+                    # Calculate gauge coordinates
+                    self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
+
+    def update_weights_(self, da_rad, da_cml=None, da_gauge=None):
+        """Update radar weights for CML and gauge
 
         This function uses the midpoint of the CML as CML reference.
 
@@ -87,7 +167,7 @@ class Merge:
         # If CML is present
         if da_cml is not None:
             # If intersect weights not computed, compute all weights
-            if self.x0_cml is None:
+            if self.intersect_weights is None:
                 # Calculate CML radar grid intersection weights
                 self.intersect_weights = (
                     plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
@@ -102,9 +182,6 @@ class Merge:
                     )
                 )
 
-                # Calculate CML midpoints
-                self.x0_cml = merge_functions.calculate_cml_midpoint(da_cml)
-
             # Update weights, reusing already computed weights
             else:
                 # New cml names
@@ -118,9 +195,6 @@ class Merge:
 
                 # Slice the stored intersect weights, keeping only new ones
                 self.intersect_weights = self.intersect_weights.sel(cml_id=cml_id_keep)
-
-                # Slice stored CML midpoints, keeping only new ones
-                self.x0_cml = self.x0_cml.sel(cml_id=cml_id_keep)
 
                 # Identify new cml_id
                 cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
@@ -149,14 +223,7 @@ class Merge:
                         [self.intersect_weights, intersect_weights_add], dim="cml_id"
                     )
 
-                    # Calculate CML midpoint for new CMLs
-                    x0_cml_add = merge_functions.calculate_cml_midpoint(da_cml_add)
-
-                    # Add to existing x0
-                    self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
-
-            # Sort x0_cml and self.intersect_weights
-            self.x0_cml = self.x0_cml.sel(cml_id=da_cml.cml_id.data)
+            # Update final self.intersect_weights
             self.intersect_weights = self.intersect_weights.sel(
                 cml_id=da_cml.cml_id.data
             )
@@ -164,7 +231,7 @@ class Merge:
         # If gauge data is present
         if da_gauge is not None:
             # If this is the first update
-            if self.x0_gauge is None:
+            if self.gauge_ids is None:
                 # Calculate gridpoints for gauges
                 self.get_grid_at_points = plg.spatial.GridAtPoints(
                     da_gridded_data=da_rad,
@@ -173,15 +240,15 @@ class Merge:
                     stat="best",
                 )
 
-                # Calculate gauge coordinates
-                self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
+                # Store gauge names for check
+                self.gauge_ids = da_gauge.id.data
 
             else:
                 # Get names of new gauges
                 gauge_id_new = da_gauge.id.data
 
                 # Get names of gauges in previous update
-                gauge_id_old = self.x0_gauge.id.data
+                gauge_id_old = self.gauge_ids
 
                 # Check that equal, element order is important
                 if not np.array_equal(gauge_id_new, gauge_id_old):
@@ -192,9 +259,6 @@ class Merge:
                         nnear=1,
                         stat="best",
                     )
-
-                # Calculate gauge coordinates
-                self.x0_gauge = merge_functions.calculate_gauge_midpoint(da_gauge)
 
     def update_block_(self, da_rad, discretization, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
@@ -461,7 +525,9 @@ class MergeMultiplicativeIDW(Merge):
 
         This function uses the midpoint of the CML as CML reference.
         """
-        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        # Update x0 and radar weights
+        self.update_x0_(da_cml=da_cml, da_gauge=da_gauge)
+        self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
         self,
@@ -568,7 +634,9 @@ class MergeAdditiveIDW(Merge):
 
         This function uses the midpoint of the CML as CML reference.
         """
-        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        # Update x0 and radar weights
+        self.update_x0_(da_cml=da_cml, da_gauge=da_gauge)
+        self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
         self,
