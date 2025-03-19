@@ -12,10 +12,10 @@ from mergeplg import merge_functions
 class Base:
     """Update weights and geometry and evaluate radar at CMLs and rain gauges
 
-    This is the parent class for the merging and interpolation methods. It works 
-    by keeping a copy of the weights used for obtaining radar observations at the 
-    ground for the CMLs (self.intersect_weights and self.x0_cml) and the rain 
-    gauges (self.get_grid_at_points and self.x0_rain_gauges). 
+    This is the parent class for the merging and interpolation methods. It works
+    by keeping a copy of the weights used for obtaining radar observations at the
+    ground for the CMLs (self.intersect_weights and self.x0_cml) and the rain
+    gauges (self.get_grid_at_points and self.x0_rain_gauges).
     """
 
     def __init__(
@@ -476,6 +476,59 @@ class Base:
                         stat="best",
                     )
 
+    def get_x0_obs_(self, da_cml=None, da_gauge=None):
+        """Calculate x0 and observations from cml and rain gauge ground positions
+        
+        Returns and ordered list of x0 geometry and ground observations
+
+        Parameters
+        ----------
+        da_cml: xarray.DataArray
+            CML observations. Must contain the coordinates for the CML positions
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
+        da_gauge: xarray.DataArray
+            gauge observations. Must contain the coordinates for the rain gauge
+            positions (lat, lon)
+        """
+        # If CML and gauge data is provided
+        if (da_cml is not None) and (da_gauge is not None):
+            # Check that we have selected only one timestep
+            assert da_cml.time.size == 1, "Select only one time step"
+            assert da_gauge.time.size == 1, "Select only one time step"
+
+            # Stack instrument observations at cml and gauge in correct order
+            observations_ground = np.concatenate(
+                [da_cml.data.ravel(), da_gauge.data.ravel()]
+            )
+
+            # Stack x0_cml and x0_gauge in correct order
+            x0 = np.vstack([self.x0_cml.data, self.x0_gauge.data])
+
+        # If only CML data is provided
+        elif da_cml is not None:
+            # Check that we have selected only one timestep
+            assert da_cml.time.size == 1, "Select only one time step"
+
+            # Get CML data
+            observations_ground = da_cml.data.ravel()
+
+            # Get CML coordinates
+            x0 = self.x0_cml.data
+
+        # If only rain gauge data is provided
+        else:
+            # Check that we have selected only one timestep
+            assert da_gauge.time.size == 1, "Select only one time step"
+
+            # Get gauge data
+            observations_ground = da_gauge.data.ravel()
+
+            # Get gauge coordinates
+            x0 = self.x0_gauge.data
+
+        # Return radar, observations and coordinates
+        return observations_ground, x0
+    
     def radar_at_ground_(self, da_rad, da_cml=None, da_gauge=None):
         """Evaluate radar at cml and rain gauge ground positions
 
