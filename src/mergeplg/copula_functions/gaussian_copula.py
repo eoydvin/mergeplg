@@ -9,13 +9,22 @@
 
 import numpy as np
 import scipy.stats as st
+<<<<<<< HEAD
 # import numexpr
+=======
+#import numexpr
+>>>>>>> fced9b6d9afb87a6383f6bcb4c04180199b270ae
 
 def stdnormpdf(x):
     return 1./(2*np.pi)**0.5 * np.exp(-x**2/2.)
 
+<<<<<<< HEAD
 # def stdnormcdf_approx(x):
 #     return numexpr.evaluate('1./(1. + exp(-0.07056*x**3 - 1.5976*x))')
+=======
+#def stdnormcdf_approx(x):
+#    return numexpr.evaluate('1./(1. + exp(-0.07056*x**3 - 1.5976*x))')
+>>>>>>> fced9b6d9afb87a6383f6bcb4c04180199b270ae
 
 def multivariate_normal_copula_pdf(u, Cov):
     '''

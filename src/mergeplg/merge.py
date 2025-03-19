@@ -769,6 +769,100 @@ class MergeAdditiveBlockKriging(Merge):
         # Else return the unadjusted radar
         return da_rad
 
+class MergeCopulaCluster(Merge):
+    """Merge CML and radar using a copula and a cluster
+
+    Merges the provided radar field in ds_rad to CML and rain gauge
+    observations by interpolating the difference between radar and ground
+    observations using a cluster algorith and a copula
+    """
+
+    def __init__(
+        self,
+        grid_location_radar="center",
+        min_obs=5,
+        discretization=8,
+    ):
+        Merge.__init__(self, grid_location_radar, min_obs)
+
+        # Number of discretization points along CML
+        self.discretization = discretization
+
+        # For storing variogram parameters
+        self.variogram_param = None
+
+    def update(self, da_rad, da_cml=None, da_gauge=None):
+        """Update weights and x0 geometry for CML and gauge assuming block data
+
+        This function uses the full CML geometry and makes the gauge geometry
+        appear as a rain gauge.
+        """
+        self.update_(
+            da_rad, da_cml=da_cml, da_gauge=da_gauge
+        )
+
+    def adjust(
+        self, da_rad, da_cml=None, da_gauge=None,  n_closest=12):
+        """Adjust radar field for one time step.
+
+        Adjust radar field for one time step. The function assumes that the
+        weights are updated using the update class method.
+
+        Parameters
+        ----------
+        da_rad: xarray.DataArray
+            Gridded radar data. Must contain the lon and lat coordinates as
+            well as the projected coordinates xs and ys as a meshgrid.
+        da_cml: xarray.DataArray
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
+        da_gauge: xarray.DataArray
+            Gauge observations. Must contain the coordinates for the rain gauge
+            positions (lat, lon) as well as the projected coordinates (x, y).
+        n_closest: int
+            Number of closest links to use for interpolation
+
+        Returns
+        -------
+        da_rad_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the CML
+            adjusted radar field.
+        """
+        # Update weights and x0 geometry for CML and gauge
+        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
+        # Evaluate radar at cml and gauge ground positions
+        rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
+        # Get index of not-nan obs
+        keep = np.where(~np.isnan(rad) & ~np.isnan(obs))[0]
+
+        # Check that that there is enough observations
+        if keep.size > self.min_obs_:
+            # get timestamp
+            time = da_rad.time.data[0]
+
+            # Remove radar time dimension
+            da_rad_t = da_rad.sel(time=time)
+
+            # do addtitive IDW merging
+            adjusted = merge_functions.merge_cluster_copula(
+                xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
+                rad[keep],
+                obs[keep],
+                x0[keep, :],
+                obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
+            )
+
+            # Replace nan with original radar data (so that da_rad nan is kept)
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+
+            # Re-assign timestamp and return
+            return adjusted.assign_coords(time=time)
+
+        # Else return the unadjusted radar
+        return da_rad
 
 class MergeBlockKrigingExternalDrift(Merge):
     """Merge CML and radar using block-kriging with external drift.
