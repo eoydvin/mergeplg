@@ -8,8 +8,84 @@ import numpy as np
 import pykrige
 import xarray as xr
 from scipy import stats
+from . import gcopula_sparaest as sparest
+from .copula_functions import covariancefunction as variogram
 
 from .radolan import idw
+
+def interpolate_difference_idw(
+    da_rad, cml_diff, x0, p=2, idw_method="radolan", nnear=8, max_distance=60000
+):
+    """Merge CML and radar using an additive approach and the CML midpoint.
+
+    Merges the CML and radar field by interpolating the difference between
+    radar and CML using IDW from sklearn.
+
+    Parameters
+    ----------
+    da_rad: xarray.DataArray
+        Gridded radar data.
+    cml_diff: numpy.array
+        Difference between the CML and radar observations at the CML locations.
+    x0: numpy.array
+        Coordinates of CML midpoints given as [[cml_1_y, cml_1_x], ..
+        [cml_n_y, cml_n_x] using the same order as cml_diff.
+    p: float
+        IDW interpolation parameter
+    idw_method: str
+        by default "radolan"
+    nnear: int
+        number of neighbours to use for interpolation
+    max_distance: float
+        max distance allowed interpolation distance
+
+    Returns
+    -------
+    da_rad_out: xarray.DataArray
+        DataArray with the same structure as the ds_rad but with the CML
+        adjusted radar field.
+
+    """
+    # Get radar grid as numpy arrays
+    xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
+
+    # Create array for storing interpolated values
+    shift = np.full_like(xgrid, np.nan)
+
+    # Gridpoints to interpolate, skip cells with nan
+    mask = np.isnan(da_rad.data)
+
+    # Check that we have any data
+    if np.sum(~mask) > 0:
+        coord_pred = np.hstack(
+            [ygrid[~mask].reshape(-1, 1), xgrid[~mask].reshape(-1, 1)]
+        )
+
+        # IDW interpolator invdisttree
+        idw_interpolator = idw.Invdisttree(x0)
+        estimate = idw_interpolator(
+            q=coord_pred,
+            z=cml_diff,
+            nnear=cml_diff.size if cml_diff.size <= nnear else nnear,
+            p=p,
+            idw_method=idw_method,
+            max_distance=max_distance,
+        )
+
+        shift[~mask] = estimate
+
+    # New dataarray
+    da_rad_out = xr.DataArray(
+        data=shift,
+        coords={
+            'y': da_rad.coords['y'],
+            'x': da_rad.coords['x']
+        },
+        dims=['y', 'x']
+    )
+        
+    # Return dataset with adjusted values
+    return da_rad_out
 
 
 def merge_additive_idw(
@@ -485,7 +561,17 @@ def calculate_gauge_midpoint(da_gauge):
     )
 
 
-def estimate_variogram(obs, x0, variogram_model="exponential"):
+def estimate_variogram(
+        x0, 
+        obs, 
+        outputfile=None, 
+        covmods='nug exp', 
+        ntries=6, 
+        nugget=0.05,  
+        maxrange = 3000, 
+        minrange = 1
+        ):
+        
     """Estimate variogram from CML and/or rain gauge data
 
     Estimates the variogram using the CML midpoints to estimate the distances.
@@ -498,34 +584,65 @@ def estimate_variogram(obs, x0, variogram_model="exponential"):
         distance between observations.
 
     """
+        
+    """
+    Wrapper function for copula / spatial dependence calculation
+    """
+    
     # If x0 contains block data, get approximate midpoints
     if len(x0.shape) > 2:
         x0 = x0[:, :, int(x0.shape[1] / 2)]
+        
 
-    try:
-        # Fit variogram using pykrige
-        ok = pykrige.OrdinaryKriging(
-            x0[:, 1],  # x coordinate
-            x0[:, 0],  # y coordinate
-            obs,
-            variogram_model=variogram_model,
-        )
+    # transform to rank values
+    u = (stats.rankdata(obs) - 0.5) / obs.shape[0]
+    
+    # set subset size
+    if len(obs[obs > 0]) < 5:
+        n_in_subset = 2
+    else:
+        n_in_subset = 5
 
-        # construct variogram using pykrige
-        def variogram(h):
-            return ok.variogram_function(ok.variogram_model_parameters, h)
 
-        # Return variogram and parameters
-        return variogram, [ok.variogram_model_parameters, ok.variogram_function]
+    # calculate copula models
+    cmods = sparest.paraest_multiple_tries(
+        np.copy(x0),
+        u,
+        ntries=[ntries, ntries],
+        n_in_subset=n_in_subset,
+        # number of values in subsets
+        neighbourhood="random",
+        # subset search algorithm
+        maxrange = maxrange,
+        minrange = minrange,        
+        covmods=[covmods],  # covariance functions
+        outputfile=outputfile,
+    )  # store all fitted models in an output file
 
-    # If an error occurs just use a linear variogram
-    except ValueError:
 
-        def variogram(h):
-            return h
+    # take the copula model with the highest likelihood
+    # reconstruct from parameter array
+    likelihood = -666
+    for model in range(len(cmods)):
+        for tries in range(ntries):
+            if cmods[model][tries][1] * -1.0 > likelihood:
+                likelihood = cmods[model][tries][1] * -1.0
+                
+                if covmods == 'exp':
+                    hr = cmods[model][tries][0][0]
+                    
+                    def cmod(h):
+                        return nugget + (1- nugget)*(1 - np.exp(-h/hr))
+                    
+                elif covmods == 'nug exp':
+                    nugget = cmods[model][tries][0][1]
+                    hr = cmods[model][tries][0][0]
+                    def cmod(h):
+                        return nugget + (1- nugget)*(1 - np.exp(-h/hr))
+    #print(nugget, hr)
 
-        # Return the linear variogram
-        return variogram, [1, variogram]
+
+    return cmod
 
 
 def estimate_transformation(obs):

@@ -5,8 +5,11 @@ from __future__ import annotations
 import numpy as np
 import poligrain as plg
 import xarray as xr
+from scipy.stats import gaussian_kde, rankdata
+from scipy.interpolate import interp1d
 
 from mergeplg import merge_functions
+
 
 
 class Merge:
@@ -155,8 +158,11 @@ class Merge:
                     # Add to existing x0
                     self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
 
-            # Sort x0_cml so it follows the same order as da_cml
+            # Sort x0_cml and self.intersect_weights
             self.x0_cml = self.x0_cml.sel(cml_id=da_cml.cml_id.data)
+            self.intersect_weights = self.intersect_weights.sel(
+                cml_id=da_cml.cml_id.data
+            )
 
         # If gauge data is present
         if da_gauge is not None:
@@ -293,8 +299,11 @@ class Merge:
                     # Add new x0 to self.x0_cml
                     self.x0_cml = xr.concat([self.x0_cml, x0_cml_add], dim="cml_id")
 
-            # Sort x0_cml so it follows the same order as da_cml
+            # Sort x0_cml and self.intersect_weights
             self.x0_cml = self.x0_cml.sel(cml_id=da_cml.cml_id.data)
+            self.intersect_weights = self.intersect_weights.sel(
+                cml_id=da_cml.cml_id.data
+            )
 
         # If gauge data is present
         if da_gauge is not None:
@@ -621,12 +630,13 @@ class MergeAdditiveBlockKriging(Merge):
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
                 # Estimate variogram
-                param = merge_functions.estimate_variogram(
+                variogram = merge_functions.estimate_variogram(
                     obs=obs[keep],
                     x0=x0[keep],
+                    covmods='nug exp', 
+                    maxrange = 50000
                 )
 
-                variogram, self.variogram_param = param
 
             # get timestamp
             time = da_rad.time.data[0]
@@ -738,12 +748,12 @@ class MergeBlockKrigingExternalDrift(Merge):
             # If variogram provided as string, estimate from ground obs.
             if isinstance(variogram, str):
                 # Estimate variogram
-                param = merge_functions.estimate_variogram(
+                variogram = merge_functions.estimate_variogram(
                     obs=obs[keep],
                     x0=x0[keep],
+                    covmods='nug exp', 
+                    maxrange = 50000
                 )
-
-                variogram, self.variogram_param = param
 
             # get timestamp
             time = da_rad.time.data[0]
@@ -755,17 +765,215 @@ class MergeBlockKrigingExternalDrift(Merge):
             adjusted = merge_functions.merge_ked_blockkriging(
                 xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
                 rad[keep],
-                obs[keep],
+                np.log(obs[keep]),
                 x0[keep],
                 variogram,
                 obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
             )
+            
 
             # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+            adjusted = xr.where(np.isnan(adjusted), da_rad_t, np.exp(adjusted))
 
             # Re-assign timestamp and return
             return adjusted.assign_coords(time=time)
 
         # Else return the unadjusted radar
         return da_rad
+
+class MergeAdditiveIDWKDE(Merge):
+    """Merge CML and radar using an additive IDW (CML midpoint).
+
+    Merges the provided radar field in ds_rad to CML observations by
+    interpolating the difference between the CML and radar observations using
+    IDW.
+    """
+
+    def __init__(
+        self,
+        grid_location_radar="center",
+        min_obs=5,
+    ):
+        Merge.__init__(self, grid_location_radar, min_obs)
+
+    def update(self, da_rad, da_cml=None, da_gauge=None):
+        """Update weights and x0 geometry for CML and gauge
+
+        This function uses the midpoint of the CML as CML reference.
+        """
+        self.update_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
+    def adjust(
+        self,
+        da_rad,
+        da_cml=None,
+        da_gauge=None,
+        p=2,
+        idw_method="radolan",
+        nnear=8,
+        max_distance=60000,
+    ):
+        """Adjust radar field for one time step.
+
+        Adjust radar field for one time step. The function assumes that the
+        weights are updated using the update class method.
+
+        Parameters
+        ----------
+        da_rad: xarray.DataArray
+            Gridded radar data. Must contain the lon and lat coordinates as
+            well as the projected coordinates xs and ys as a meshgrid.
+        da_cml: xarray.DataArray
+            CML observations. Must contain the lat/lon coordinates for the CML
+            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            projected midpoint coordinates (x, y).
+        da_gauge: xarray.DataArray
+            Gauge observations. Must contain the coordinates for the rain gauge
+            positions (lat, lon) as well as the projected coordinates (x, y).
+        p: float
+            IDW interpolation parameter
+        idw_method: str
+            by default "radolan"
+        nnear: int
+            number of neighbours to use for interpolation
+        max_distance: float
+            max distance allowed interpolation distance
+
+        Returns
+        -------
+        da_rad_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the CML
+            adjusted radar field.
+        """
+        # Update weights and x0 geometry for CML and gauge
+        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
+        # Evaluate radar at cml and gauge ground positions
+        rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        
+        # Calculate radar-instrument difference if radar has observation
+        diff = np.where(rad > 0, obs - rad, np.nan)
+
+        # Get index of not-nan obs
+        keep = np.where(~np.isnan(diff) & (obs > 0))[0]
+        
+        # get timestamp
+        time = da_rad.time.data[0]
+
+        # Remove radar time dimension
+        da_rad_t = da_rad.sel(time=time)
+
+        # Check that that there is enough observations
+        if (keep.size > self.min_obs_) & ((obs > 0).sum() > self.min_obs_):
+
+
+            # do addtitive IDW merging
+            difference_field = merge_functions.interpolate_difference_idw(
+                xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
+                diff[keep],
+                x0[keep, :],
+                p=p,
+                idw_method=idw_method,
+                nnear=nnear,
+                max_distance=max_distance,
+            )
+            # Number of bins to compute KDE and CDF
+            
+            import matplotlib.pyplot as plt
+            # plt.imshow(difference_field)
+            # plt.colorbar()
+            # plt.show()
+            
+            
+            bins_radar = 20 # 
+            bins_cml = 100 # Used for CDF
+            # Scatterplot and kde
+            radar_values = rad[keep]
+            cml_values = obs[keep]
+            plt.scatter(radar_values, cml_values, color='r')
+            plt.show()
+
+            data = np.vstack([radar_values, cml_values])
+            
+            kde = gaussian_kde(data)
+            
+            # Grid for interpolation
+            radar_min, radar_max = 0, radar_values.max()*2
+            cml_min, cml_max = 0, cml_values.max()*2
+            radar_grid = np.linspace(radar_min, radar_max, bins_radar)
+            cml_grid = np.linspace(cml_min, cml_max, bins_cml)
+            
+            X, Y = np.meshgrid(radar_grid, cml_grid)
+            positions = np.vstack([X.ravel(), Y.ravel()])
+            
+            # Evaluate KDE on the grid
+            Z = np.reshape(kde(positions), X.shape)
+            
+            # Set first values to zero
+            Z[0, :] = 0
+            plt.contourf(X, Y, Z, 30)
+            plt.scatter(radar_values, cml_values, color='r')
+            plt.show()
+
+            # Estimate CDF for bins
+            cdf = np.cumsum(Z, axis = 0)
+            cdf /= cdf[-1]
+
+            # Radar field
+            radar_field = da_rad_t.data.ravel()
+            plt.contourf(X, Y, cdf, 30)
+            plt.scatter(radar_values, cml_values, color='r')
+            plt.show()
+            
+            i = 0
+            adjust = np.full_like(radar_field, np.nan)
+            for i in range(radar_grid.size-1):
+                # Interpolate CDF
+                cdf_f = interp1d(cdf[:, i], cml_grid, kind='linear')
+    
+                # radar upper and lower
+                upper_rad, lower_rad = radar_grid[i+1], radar_grid[i]
+
+                #print(diff_rank)
+                mask = (radar_field >= lower_rad) & (radar_field < upper_rad)
+                
+                
+                band = difference_field.data.ravel()[mask]
+                
+                # Get rank data of differences
+                diff_rank = rankdata(band, nan_policy = 'omit')/band.size
+                                
+                            
+                adjust[mask] = cdf_f(diff_rank)
+                
+            # reshape
+            adjust = np.reshape(adjust, da_rad_t.shape)
+            
+            # Store
+            return xr.DataArray(
+                data=[adjust],
+                coords={
+                    'time': da_rad.coords['time'],
+                    'y': da_rad.coords['y'],
+                    'x': da_rad.coords['x'],
+
+                },
+                dims=['time', 'y', 'x']
+            )
+            
+        
+        # Else return the unadjusted radar
+        return xr.DataArray(
+            data=[da_rad_t.data],
+            coords={
+                'time': da_rad.coords['time'],
+                'y': da_rad.coords['y'],
+                'x': da_rad.coords['x'],
+
+            },
+            dims=['time', 'y', 'x']
+        )
+    
+    
+    
+
