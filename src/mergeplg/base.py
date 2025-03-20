@@ -351,8 +351,8 @@ class Base:
                         disc=range(discretization + 1)
                     ).transpose("id", "yx", "disc")
 
-    def get_x0_obs_(self, da_cml=None, da_gauge=None):
-        """Calculate x0 and observations from cml and rain gauge ground positions
+    def get_obs_x0_(self, da_cml=None, da_gauge=None):
+        """Calculate ground observations and x0 for current state
         
         Returns and ordered list of x0 geometry and ground observations
 
@@ -404,12 +404,10 @@ class Base:
         # Return radar, observations and coordinates
         return observations_ground, x0
     
-    def radar_at_ground_(self, da_rad, da_cml=None, da_gauge=None):
-        """Evaluate radar at cml and rain gauge ground positions
+    def get_rad_obs_x0_(self, da_rad, da_cml=None, da_gauge=None):
+        """Calculate radar, ground observation and x0 for current state
 
-        Evaluates weather radar along cml and at rain gauge positions. Assumes
-        that the rain gauge and CML weights are updated.
-
+        Returns and ordered list of radar, ground observations and x0 geometry
         Parameters
         ----------
         da_rad: xarray.DataArray

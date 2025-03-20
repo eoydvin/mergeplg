@@ -75,7 +75,7 @@ class InterpolateIDW(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        obs, x0 = self.get_x0_obs_(da_cml=da_cml, da_gauge=da_gauge)
+        obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
@@ -180,7 +180,7 @@ class InterpolateBlockKriging(Base):
         self.update(da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        obs, x0 = self.get_x0_obs_(da_cml=da_cml, da_gauge=da_gauge)
+        obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]

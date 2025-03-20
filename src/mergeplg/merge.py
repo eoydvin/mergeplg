@@ -82,7 +82,7 @@ class MergeDifferenceIDW(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Calculate radar-ground difference if radar observes rainfall
         if method == 'additive':
