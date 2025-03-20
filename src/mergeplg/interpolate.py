@@ -219,7 +219,7 @@ class InterpolateBlockKriging(Base):
                 obs[keep], 
                 x0[keep],
                 variogram,
-                diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
+                obs[keep].size - 1 if obs[keep].size <= nnear else nnear,
             )
 
         return xr.DataArray(

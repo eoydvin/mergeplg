@@ -5,9 +5,6 @@ Created on Fri Oct 18 20:21:53 2024
 """
 
 import numpy as np
-import pykrige
-import xarray as xr
-from scipy import stats
 
 def interpolate_neighbourhood_block_kriging(
         xgrid, 
