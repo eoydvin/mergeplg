@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+import pykrige
 
+from .radolan import idw
 from mergeplg import merge_functions
 from mergeplg import interpolate_functions
 from mergeplg.base import Base
@@ -100,18 +102,21 @@ class MergeDifferenceIDW(Base):
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
 
-        # Interpolate the difference
-        interpolated = interpolate_functions.interpolate_idw(
-            da_rad.xs.data, 
-            da_rad.ys.data,
-            diff[keep],
-            x0[keep, :],
+        coord_pred = np.hstack(
+            [da_rad.ys.data.reshape(-1, 1), da_rad.xs.data.reshape(-1, 1)]
+        )
+
+        # IDW interpolator invdisttree
+        idw_interpolator = idw.Invdisttree(x0[keep])
+        interpolated = idw_interpolator(
+            q=coord_pred,
+            z=diff[keep],
+            nnear=obs[keep].size if obs[keep].size <= nnear else nnear,
             p=p,
             idw_method=idw_method,
-            nnear=nnear,
             max_distance=max_distance,
-        )
-        
+        ).reshape(da_rad.xs.shape)
+
         # Adjust radar field
         if method == 'additive':
             adjusted = interpolated + da_rad.isel(time = 0).data
@@ -162,7 +167,8 @@ class MergeDifferenceBlockKriging(Base):
         da_rad, 
         da_cml=None, 
         da_gauge=None, 
-        variogram="exponential", 
+        variogram_model="spherical",
+        variogram_parameters={"sill": 0.9, "range": 5000, "nugget": 0.1},
         nnear=8,
         max_distance=60000,
         full_line = True,
@@ -184,9 +190,10 @@ class MergeDifferenceBlockKriging(Base):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the projected 
             coordinates (x, y).
-        variogram: function or str
-            If function: Must return expected variance given distance between
-            observations. If string: Must be a valid variogram type in pykrige.
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
         nnear: int
             Number of closest links to use for interpolation
         max_distance: float
@@ -210,6 +217,8 @@ class MergeDifferenceBlockKriging(Base):
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
+        
+        
         # Calculate radar-ground difference if radar observes rainfall
         if method == 'additive':
             diff = np.where(rad>0, obs- rad, np.nan)
@@ -224,19 +233,22 @@ class MergeDifferenceBlockKriging(Base):
         else:
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
+
+        # Estimate variogram using midpoints of the link
+        ok = pykrige.OrdinaryKriging(
+            x0[keep, 1, int(x0.shape[1] / 2)], #x-midpoint coordinate
+            x0[keep, 0, int(x0.shape[1] / 2)], #y-midpoint coordinate
+            obs[keep],
+            variogram_model=variogram_model,
+            variogram_parameters=variogram_parameters,
+        )
         
-        # If variogram provided as string, estimate from ground obs.
-        if isinstance(variogram, str):
-            # Estimate variogram
-            param = interpolate_functions.estimate_variogram(
-                obs=diff[keep],
-                x0=x0[keep],
-            )
-
-            variogram, self.variogram_param = param
-
         # If n_closest is provided as an integer
         if nnear != False:
+            # Construct variogram using pykrige
+            def variogram(h):
+                return ok.variogram_function(ok.variogram_model_parameters, h)
+
             # Interpolate using neighbourhood block kriging
             interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
                 da_rad.xs.data,
@@ -247,17 +259,15 @@ class MergeDifferenceBlockKriging(Base):
                 diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
             )
 
-        # If n_closest is set to False, use full kriging matrix
+        # If midpoint is used as reference, perform interpolation using pykrige
         else:
-            # Interpolate using block kriging
-            interpolated = interpolate_functions.interpolate_block_kriging(
-                da_rad.xs.data,
-                da_rad.ys.data,
-                diff[keep],
-                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
-                variogram,
-            )
-        
+            interpolated, ss = ok.execute(
+                    "points", 
+                    da_rad.xs.data.ravel(), 
+                    da_rad.ys.data.ravel()
+                    )
+            interpolated = interpolated.reshape(da_rad.xs.shape)
+
         # Adjust radar field
         if method == 'additive':
             adjusted = interpolated + da_rad.isel(time = 0).data
