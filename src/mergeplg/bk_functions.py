@@ -50,7 +50,7 @@ def interpolate_neighbourhood_block_kriging(
     """
 
     # Calculate lengths between all points along all CMLs
-    lengths_point_l = merge_functions.block_points_to_lengths(x0)
+    lengths_point_l = block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
     cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
@@ -133,7 +133,7 @@ def interpolate_block_kriging(
         the interpolated field.
     """
     # Calculate lengths between all points along all CMLs
-    lengths_point_l = merge_functions.block_points_to_lengths(x0)
+    lengths_point_l = block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
     cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
@@ -330,135 +330,3 @@ def block_points_to_lengths(x0):
     )
 
 
-def calculate_cml_line(ds_cmls, discretization=8):
-    """Calculate the position of points along CMLs.
-
-    Calculates the discretized CML line coordinates by dividing the CMLs into
-    discretization-number of intervals. The ds_cmls xarray object must contain the
-    projected coordinates (site_0_x, site_0_y, site_1_x site_1_y) defining
-    the start and end point of the CML. If no such projection is available
-    the user can, as an approximation, rename the lat/lon coordinates so that
-    they are accepted into this function. Beware that for lat/lon coordinates
-    the line geometry is not perfectly represented.
-
-    Parameters
-    ----------
-    ds_cmls: xarray.Dataset
-        CML geometry as a xarray object. Must contain the coordinates
-        (site_0_x, site_0_y, site_1_x site_1_y)
-    discretization: int
-        Number of intervals to discretize lines into.
-
-    Returns
-    -------
-    x0: xr.DataArray
-        Array with coordinates for all CMLs. The array is organized into a 3D
-        matrix with the following structure:
-            (number of n CMLs [0, ..., n],
-             y/x-cooridnate [0(y), 1(x)],
-             interval [0, ..., discretization])
-
-    """
-    # Calculate discretized positions along the lines, store in numy array
-    xpos = np.zeros([ds_cmls.cml_id.size, discretization + 1])  # shape (line, position)
-    ypos = np.zeros([ds_cmls.cml_id.size, discretization + 1])
-
-    # For all CMLs
-    for block_i, cml_id in enumerate(ds_cmls.cml_id):
-        x_a = ds_cmls.sel(cml_id=cml_id).site_0_x.data
-        y_a = ds_cmls.sel(cml_id=cml_id).site_0_y.data
-        x_b = ds_cmls.sel(cml_id=cml_id).site_1_x.data
-        y_b = ds_cmls.sel(cml_id=cml_id).site_1_y.data
-
-        # for all dicretization steps in link estimate its place on the grid
-        for i in range(discretization + 1):
-            xpos[block_i, i] = x_a + (i / discretization) * (x_b - x_a)
-            ypos[block_i, i] = y_a + (i / discretization) * (y_b - y_a)
-
-    # Store x and y coordinates in the same array (n_cmls, y/x, discretization)
-    x0_cml = np.array([ypos, xpos]).transpose([1, 0, 2])
-
-    # Turn into xarray dataarray and return
-    return xr.DataArray(
-        x0_cml,
-        coords={
-            "cml_id": ds_cmls.cml_id.data,
-            "yx": ["y", "x"],
-            "discretization": np.arange(discretization + 1),
-        },
-    )
-
-
-def calculate_cml_midpoint(da_cml):
-    """Calculate DataArray with midpoints of CMLs
-
-    Calculates the CML midpoints and stores the results in an xr.DataArray.
-    The da_cml xarray object must contain the projected coordinates (site_0_x,
-    site_0_y, site_1_x site_1_y) defining the start and end point of the CML.
-
-    Parameters
-    ----------
-    da_cml: xarray.DataArray
-        CML geometry as a xarray object. Must contain the coordinates
-        (site_0_x, site_0_y, site_1_x site_1_y)
-
-    Returns
-    -------
-    x0: xr.DataArray
-        Array with midpoints for all CMLs. The array is organized into a 2D
-        matrix with the following structure:
-            (number of n CMLs [0, ..., n],
-             y/x-cooridnate [y, x],
-    """
-    # CML midpoint coordinates as columns
-    x = ((da_cml.site_0_x + da_cml.site_1_x) / 2).data
-    y = ((da_cml.site_0_y + da_cml.site_1_y) / 2).data
-
-    # CML midpoint coordinates as columns
-    x0_cml = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-
-    # Create dataarray and return
-    return xr.DataArray(
-        x0_cml,
-        coords={
-            "cml_id": da_cml.cml_id.data,
-            "yx": ["y", "x"],
-        },
-    )
-
-
-def calculate_gauge_midpoint(da_gauge):
-    """Calculate DataArray with coordinates of raingauge
-
-    Calculates the gauge coordinates and stores the results in an xr.DataArray.
-    The da_gauge xarray object must contain the projected coordinates (y, x)
-    defining the position of the raingauge.
-
-    Parameters
-    ----------
-    da_gauge: xarray.DataArray
-        Gauge coordinate as a xarray object. Must contain the coordinates (y, x)
-
-    Returns
-    -------
-    x0: xr.DataArray
-        Array with coordinates for all gauges. The array is organized into a 2D
-        matrix with the following structure:
-            (number of n gauges [0, ..., n],
-             y/x-cooridnate [y, x],
-    """
-    x0_gauge = np.hstack(
-        [
-            da_gauge.y.data.reshape(-1, 1),
-            da_gauge.x.data.reshape(-1, 1),
-        ]
-    )
-
-    # Create dataarray return
-    return xr.DataArray(
-        x0_gauge,
-        coords={
-            "id": da_gauge.id.data,
-            "yx": ["y", "x"],
-        },
-    )

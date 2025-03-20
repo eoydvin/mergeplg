@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+import pykrige
 
-from mergeplg import merge_functions
-from mergeplg import interpolate_functions
+from .radolan import idw
+from mergeplg import bk_functions
 from mergeplg.base import Base
 
 
@@ -80,17 +81,21 @@ class InterpolateIDW(Base):
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
 
-        # Do addtitive IDW merging
-        interpolated = interpolate_functions.interpolate_idw(
-            da_grid.xs.data, 
-            da_grid.ys.data,
-            obs[keep],
-            x0[keep, :],
+        # Coordinates to predict
+        coord_pred = np.hstack(
+            [da_grid.ys.data.reshape(-1, 1), da_grid.xs.data.reshape(-1, 1)]
+        )
+
+        # IDW interpolator invdisttree
+        idw_interpolator = idw.Invdisttree(x0[keep])
+        interpolated = idw_interpolator(
+            q=coord_pred,
+            z=obs[keep],
+            nnear=obs[keep].size if obs[keep].size <= nnear else nnear,
             p=p,
             idw_method=idw_method,
-            nnear=nnear,
             max_distance=max_distance,
-        )
+        ).reshape(da_grid.xs.shape)
 
         return xr.DataArray(
             data=[interpolated],
@@ -119,9 +124,6 @@ class InterpolateBlockKriging(Base):
         # Number of discretization points along CML
         self.discretization = discretization
 
-        # For storing variogram parameters
-        self.variogram_param = None
-
     def update(self, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
@@ -135,7 +137,8 @@ class InterpolateBlockKriging(Base):
         da_grid, 
         da_cml=None, 
         da_gauge=None, 
-        variogram="exponential", 
+        variogram_model="spherical",
+        variogram_parameters={"sill": 0.9, "range": 5000, "nugget": 0.1},
         nnear=8,
         full_line = True,
     ):
@@ -155,9 +158,10 @@ class InterpolateBlockKriging(Base):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the projected 
             coordinates (x, y).
-        variogram: function or str
-            If function: Must return expected variance given distance between
-            observations. If string: Must be a valid variogram type in pykrige.
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
         nnear: int
             Number of closest links to use for interpolation
         max_distance: float
@@ -180,40 +184,44 @@ class InterpolateBlockKriging(Base):
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
-
-        # If variogram provided as string, estimate from ground obs.
-        if isinstance(variogram, str):
-            # Estimate variogram
-            param = interpolate_functions.estimate_variogram(
-                obs=obs[keep],
-                x0=x0[keep],
-            )
-
-            variogram, self.variogram_param = param
-
-        # If n_closest is provided as an integer
-        if nnear != False:
-            # Interpolate using neighbourhood block kriging
-            interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
-                da_grid.xs.data,
-                da_grid.ys.data,
-                obs[keep],
-                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
-                variogram,
-                obs[keep].size - 1 if obs[keep].size <= nnear else nnear,
-            )
-
-        # If n_closest is set to False, use full kriging matrix
-        else:
-            # Interpolate using block kriging
-            interpolated = interpolate_functions.interpolate_block_kriging(
-                da_grid.xs.data,
-                da_grid.ys.data,
-                obs[keep],
-                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
-                variogram,
-            )
         
+        # Setup pykrige with variogram parameters provided by user
+        ok = pykrige.OrdinaryKriging(
+            x0[keep, 1, int(x0.shape[1] / 2)], #x-midpoint coordinate
+            x0[keep, 0, int(x0.shape[1] / 2)], #y-midpoint coordinate
+            obs[keep],
+            variogram_model=variogram_model,
+            variogram_parameters=variogram_parameters,
+        )
+        
+        # Construct variogram using pykrige
+        def variogram(h):
+            return ok.variogram_function(ok.variogram_model_parameters, h)
+        
+        # Force interpolator to use only midpoint
+        if full_line is False:
+            x0 = x0[keep, :, [int(x0.shape[1] / 2)]]
+
+        # If nnear is set to False, use all observations in kriging
+        if nnear == False:
+            interpolated = bk_functions.interpolate_block_kriging(
+                da_grid.xs.data,
+                da_grid.ys.data,
+                obs[keep], 
+                x0[keep],
+                variogram,
+            )    
+        # Else do neighbourhood kriging
+        else:
+            interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
+                da_grid.xs.data,
+                da_grid.ys.data,
+                obs[keep], 
+                x0[keep],
+                variogram,
+                diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
+            )
+
         return xr.DataArray(
             data=[interpolated],
             coords=da_grid.coords,

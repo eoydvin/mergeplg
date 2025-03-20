@@ -7,8 +7,7 @@ import xarray as xr
 import pykrige
 
 from .radolan import idw
-from mergeplg import merge_functions
-from mergeplg import interpolate_functions
+from mergeplg import bk_functions
 from mergeplg.base import Base
 
 
@@ -101,7 +100,8 @@ class MergeDifferenceIDW(Base):
         else:
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
-
+        
+        # Coordinates to predict
         coord_pred = np.hstack(
             [da_rad.ys.data.reshape(-1, 1), da_rad.xs.data.reshape(-1, 1)]
         )
@@ -217,8 +217,6 @@ class MergeDifferenceBlockKriging(Base):
         # Evaluate radar at cml and gauge ground positions
         rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
-        
-        
         # Calculate radar-ground difference if radar observes rainfall
         if method == 'additive':
             diff = np.where(rad>0, obs- rad, np.nan)
@@ -234,39 +232,43 @@ class MergeDifferenceBlockKriging(Base):
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
 
-        # Estimate variogram using midpoints of the link
+        # Setup pykrige with variogram parameters provided by user
         ok = pykrige.OrdinaryKriging(
             x0[keep, 1, int(x0.shape[1] / 2)], #x-midpoint coordinate
             x0[keep, 0, int(x0.shape[1] / 2)], #y-midpoint coordinate
-            obs[keep],
+            diff[keep],
             variogram_model=variogram_model,
             variogram_parameters=variogram_parameters,
         )
+       
+        # Construct variogram using pykrige
+        def variogram(h):
+            return ok.variogram_function(ok.variogram_model_parameters, h)
         
-        # If n_closest is provided as an integer
-        if nnear != False:
-            # Construct variogram using pykrige
-            def variogram(h):
-                return ok.variogram_function(ok.variogram_model_parameters, h)
+        # Force interpolator to use only midpoint
+        if full_line is False:
+            x0 = x0[keep, :, [int(x0.shape[1] / 2)]]
 
-            # Interpolate using neighbourhood block kriging
-            interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
+        # If nnear is set to False, use all observations in kriging
+        if nnear == False:
+            interpolated = bk_functions.interpolate_block_kriging(
                 da_rad.xs.data,
                 da_rad.ys.data,
                 diff[keep], 
-                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
+                x0[keep],
+                variogram,
+            )    
+
+        # Else do neighbourhood kriging
+        else:
+            interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
+                da_rad.xs.data,
+                da_rad.ys.data,
+                diff[keep], 
+                x0[keep],
                 variogram,
                 diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
             )
-
-        # If midpoint is used as reference, perform interpolation using pykrige
-        else:
-            interpolated, ss = ok.execute(
-                    "points", 
-                    da_rad.xs.data.ravel(), 
-                    da_rad.ys.data.ravel()
-                    )
-            interpolated = interpolated.reshape(da_rad.xs.shape)
 
         # Adjust radar field
         if method == 'additive':
@@ -312,7 +314,13 @@ class MergeBlockKrigingExternalDrift(Base):
         self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
-        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
+        self, 
+        da_rad, 
+        da_cml=None, 
+        da_gauge=None, 
+        variogram_model="spherical",
+        variogram_parameters={"sill": 0.9, "range": 5000, "nugget": 0.1},
+        n_closest=8
     ):
         """Adjust radar field for one time step.
 
@@ -335,9 +343,10 @@ class MergeBlockKrigingExternalDrift(Base):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates for the rain gauge
             positions (lat, lon) as well as the projected coordinates (x, y).
-        variogram: function
-            If function: Must return expected variance given distance between
-            observations. If string: Must be a valid variogram type in pykrige.
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
         n_closest: int
             Number of closest links to use for interpolation
 
@@ -356,27 +365,27 @@ class MergeBlockKrigingExternalDrift(Base):
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
 
-        # If variogram provided as string, estimate from ground obs.
-        if isinstance(variogram, str):
-            # Estimate variogram
-            param = interpolate_functions.estimate_variogram(
-                obs=obs[keep],
-                x0=x0[keep],
-            )
-
-            variogram, self.variogram_param = param
-
-        # get timestamp
-        time = da_rad.time.data[0]
+        # Setup pykrige with variogram parameters provided by user
+        ok = pykrige.OrdinaryKriging(
+            x0[keep, 1, int(x0.shape[1] / 2)], #x-midpoint coordinate
+            x0[keep, 0, int(x0.shape[1] / 2)], #y-midpoint coordinate
+            obs[keep],
+            variogram_model=variogram_model,
+            variogram_parameters=variogram_parameters,
+        )
+        
+        # Construct variogram using pykrige
+        def variogram(h):
+            return ok.variogram_function(ok.variogram_model_parameters, h)
 
         # Remove radar time dimension
-        rad_field = da_rad.sel(time=time).data
+        rad_field = da_rad.isel(time=0).data
 
         # Set zero values to nan, these are ignored in ked function
         rad_field[rad_field <= 0] = np.nan
 
         # do addtitive IDW merging
-        adjusted = merge_functions.merge_ked_blockkriging(
+        adjusted = bk_functions.merge_ked_blockkriging(
             rad_field,
             da_rad.xs.data,
             da_rad.ys.data,
