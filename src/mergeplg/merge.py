@@ -292,19 +292,13 @@ class MergeBlockKrigingExternalDrift(Base):
         # Number of discretization points along CML
         self.discretization = discretization
 
-        # For storing pykrige variogram parameters
-        self.variogram_param = None
-
-        # For storing gamma parameters
-        self.gamma_param = None
-
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
         This function uses the full CML geometry and makes the gauge geometry
         appear as a rain gauge.
         """
-        self.update_weights_block_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
         self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
@@ -347,44 +341,46 @@ class MergeBlockKrigingExternalDrift(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
 
-        # Check that that there is enough observations
-        if keep.size > self.min_obs_:
-            # If variogram provided as string, estimate from ground obs.
-            if isinstance(variogram, str):
-                # Estimate variogram
-                param = merge_functions.estimate_variogram(
-                    obs=obs[keep],
-                    x0=x0[keep],
-                )
-
-                variogram, self.variogram_param = param
-
-            # get timestamp
-            time = da_rad.time.data[0]
-
-            # Remove radar time dimension
-            da_rad_t = da_rad.sel(time=time)
-
-            # do addtitive IDW merging
-            adjusted = merge_functions.merge_ked_blockkriging(
-                xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
-                rad[keep],
-                obs[keep],
-                x0[keep],
-                variogram,
-                obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
+        # If variogram provided as string, estimate from ground obs.
+        if isinstance(variogram, str):
+            # Estimate variogram
+            param = interpolate_functions.estimate_variogram(
+                obs=obs[keep],
+                x0=x0[keep],
             )
 
-            # Replace nan with original radar data (so that da_rad nan is kept)
-            adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+            variogram, self.variogram_param = param
 
-            # Re-assign timestamp and return
-            return adjusted.assign_coords(time=time)
+        # get timestamp
+        time = da_rad.time.data[0]
 
-        # Else return the unadjusted radar
-        return da_rad
+        # Remove radar time dimension
+        da_rad_t = da_rad.sel(time=time)
+
+        # do addtitive IDW merging
+        adjusted = merge_functions.merge_ked_blockkriging(
+            xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
+            rad[keep],
+            obs[keep],
+            x0[keep],
+            variogram,
+            obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
+        )
+
+        # Replace nan with original radar data (so that da_rad nan is kept)
+        adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted).data
+
+        # Remove negative values
+        adjusted[adjusted < 0] = 0
+
+        return xr.DataArray(
+            data=[adjusted],
+            coords=da_rad.coords,
+            dims=da_rad.dims
+        )
+
