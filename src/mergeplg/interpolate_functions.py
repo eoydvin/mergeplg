@@ -8,7 +8,7 @@ import numpy as np
 import pykrige
 import xarray as xr
 from scipy import stats
-
+from mergeplg import merge_functions
 from .radolan import idw
 
 
@@ -73,7 +73,6 @@ def interpolate_neighbourhood_block_kriging(
         x0, 
         variogram, 
         nnear,
-        max_distance=60000,
     ):
     """Interpolate observations using neighbourhood block kriging
 
@@ -98,8 +97,6 @@ def interpolate_neighbourhood_block_kriging(
         h and returns the expected variance.
     nnear: int
         Number of neighbors to use for interpolation
-    max_distance: float
-        Max allowed distance for including a observation
 
     Returns
     -------
@@ -110,7 +107,7 @@ def interpolate_neighbourhood_block_kriging(
     """
 
     # Calculate lengths between all points along all CMLs
-    lengths_point_l = block_points_to_lengths(x0)
+    lengths_point_l = merge_functions.block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
     cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
@@ -133,7 +130,6 @@ def interpolate_neighbourhood_block_kriging(
         delta_x = x0[:, 1] - xgrid_t[i]
         delta_y = x0[:, 0] - ygrid_t[i]
         lengths = np.sqrt(delta_x**2 + delta_y**2)
-        length[lengths > max_distance] = np.nan
 
         # Get the n closest links
         indices = np.argpartition(np.nanmin(lengths, axis=1), nnear)[:nnear]
@@ -152,7 +148,7 @@ def interpolate_neighbourhood_block_kriging(
         w = (a_inv @ target)[:-1]
 
         # Estimate rainfall amounts at location i
-        estimate[i] = cml_diff[indices] @ w
+        estimate[i] = obs[indices] @ w
 
     # Return dataset with interpolated values
     return estimate.reshape(xgrid.shape)
@@ -163,7 +159,6 @@ def interpolate_block_kriging(
         obs, 
         x0, 
         variogram, 
-        max_distance=60000,
     ):
     """Interpolate observations using block kriging
 

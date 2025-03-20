@@ -137,7 +137,6 @@ class InterpolateBlockKriging(Base):
         da_gauge=None, 
         variogram="exponential", 
         nnear=8,
-        max_distance=60000,
         full_line = True,
     ):
         """Interpolate observations for one time step.
@@ -201,12 +200,10 @@ class InterpolateBlockKriging(Base):
             interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
                 xgrid,
                 ygrid,
-                # If full_line is false, use approximate midpoint coordinate of CML
-                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
-                x0[keep, :],
+                obs[keep],
+                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
                 variogram,
                 diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
-                max_distance=max_distance,
             )
 
         # If n_closest is set to False, use full kriging matrix
@@ -215,9 +212,8 @@ class InterpolateBlockKriging(Base):
             interpolated = interpolate_functions.interpolate_block_kriging(
                 xgrid,
                 ygrid,
-                # If full_line is false, use approximate midpoint coordinate of CML
-                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
-                x0[keep, :],
+                obs[keep],
+                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
                 variogram,
             )
         

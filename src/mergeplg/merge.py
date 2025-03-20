@@ -127,12 +127,12 @@ class MergeDifferenceIDW(Base):
             dims=da_rad.dims
         )
 
-class MergeAdditiveBlockKriging(Base):
-    """Merge CML and radar using additive block kriging
+class MergeDifferenceBlockKriging(Base):
+    """Merge CML and radar using block kriging
 
-    Merges the provided radar field in ds_rad to CML and rain gauge
-    observations by interpolating the difference between radar and ground
-    observations using block kriging.
+    Merges the provided radar field in ds_rad with gauge or CML observations
+    by interpolating the difference (additive or multiplicative) 
+    between the ground and radar observations using Block Kriging.
     """
 
     def __init__(
@@ -140,7 +140,7 @@ class MergeAdditiveBlockKriging(Base):
         grid_location_radar="center",
         discretization=8,
     ):
-        Base.__init__(self, grid_location_radar, min_obs)
+        Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
@@ -158,12 +158,20 @@ class MergeAdditiveBlockKriging(Base):
         self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
-        self, da_rad, da_cml=None, da_gauge=None, variogram="exponential", n_closest=8
+        self, 
+        da_rad, 
+        da_cml=None, 
+        da_gauge=None, 
+        variogram="exponential", 
+        nnear=8,
+        max_distance=60000,
+        full_line = True,
+        method='additive'
     ):
-        """Adjust radar field for one time step.
+        """Interpolate observations for one time step.
 
-        Adjust radar field for one time step. The function assumes that the
-        weights are updated using the update class method.
+        Interpolates ground observations for one time step. The function assumes that the
+        x0 are updated using the update class method.
 
         Parameters
         ----------
@@ -171,66 +179,100 @@ class MergeAdditiveBlockKriging(Base):
             Gridded radar data. Must contain the lon and lat coordinates as
             well as the projected coordinates xs and ys as a meshgrid.
         da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
-            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
+            CML observations. Must contain the projected midpoint 
+            coordinates (x, y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon) as well as the projected coordinates (x, y).
+            Gauge observations. Must contain the projected 
+            coordinates (x, y).
         variogram: function or str
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
-        n_closest: int
+        nnear: int
             Number of closest links to use for interpolation
+        max_distance: float
+            Largest distance allowed for including an observation.
+        full_line: bool
+            Wether to use the full line for block kriging. If set to false, the 
+            x0 geometry is reformated to simply reflect the midpoint of the CML. 
+        method: str
+            Set to 'additive' to use additive approach, or 'multiplicative' to
+            use the multiplicative approach.
 
         Returns
         -------
-        da_rad_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the CML
-            adjusted radar field.
+        da_field_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the
+            interpolated field. 
         """
         # Update weights and x0 geometry for CML and gauge
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.radar_at_ground_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
-        # Calculate radar-instrument difference if radar has observation
-        diff = np.where(rad > 0, obs - rad, np.nan)
+        # Calculate radar-ground difference if radar observes rainfall
+        if method == 'additive':
+            diff = np.where(rad>0, obs- rad, np.nan)
+            keep = np.where(~np.isnan(diff))[0]
 
-        # Get index of not-nan obs
-        keep = np.where(~np.isnan(diff))[0]
+        elif method == 'multiplicative':
+            mask_zero = rad > 0.0
+            diff = np.full_like(obs, np.nan, dtype=np.float64)
+            diff[mask_zero] = obs[mask_zero]/rad[mask_zero]
+            keep = np.where((~np.isnan(diff)) & (diff < np.nanquantile(diff, 0.95)))[0]
 
+        else:
+            msg = "Method must be multiplicative or additive"
+            raise ValueError(msg)
+        
         # If variogram provided as string, estimate from ground obs.
         if isinstance(variogram, str):
             # Estimate variogram
-            param = merge_functions.estimate_variogram(
-                obs=obs[keep],
+            param = interpolate_functions.estimate_variogram(
+                obs=diff[keep],
                 x0=x0[keep],
             )
 
             variogram, self.variogram_param = param
 
-        # get timestamp
-        time = da_rad.time.data[0]
+        # If n_closest is provided as an integer
+        if nnear != False:
+            # Interpolate using neighbourhood block kriging
+            interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
+                da_rad.xs.data,
+                da_rad.ys.data,
+                diff[keep], 
+                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
+                variogram,
+                diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
+            )
 
-        # Remove radar time dimension
-        da_rad_t = da_rad.sel(time=time)
+        # If n_closest is set to False, use full kriging matrix
+        else:
+            # Interpolate using block kriging
+            interpolated = interpolate_functions.interpolate_block_kriging(
+                da_rad.xs.data,
+                da_rad.ys.data,
+                diff[keep],
+                x0[keep, :] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]],
+                variogram,
+            )
+        
+        # Adjust radar field
+        if method == 'additive':
+            adjusted = interpolated + da_rad.isel(time = 0).data
+        elif method == 'multiplicative':
+            adjusted = interpolated*da_rad.isel(time = 0).data
 
-        # do addtitive IDW merging
-        adjusted = merge_functions.merge_additive_blockkriging(
-            xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
-            diff[keep],
-            x0[keep, :],
-            variogram,
-            diff[keep].size - 1 if diff[keep].size <= n_closest else n_closest,
+
+        # Remove negative values
+        adjusted[adjusted < 0] = 0
+
+        return xr.DataArray(
+            data=[adjusted],
+            coords=da_rad.coords,
+            dims=da_rad.dims
         )
-
-        # Replace nan with original radar data (so that da_rad nan is kept)
-        adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
-
-        # Re-assign timestamp and return
-        return adjusted.assign_coords(time=time)
 
 class MergeBlockKrigingExternalDrift(Base):
     """Merge CML and radar using block-kriging with external drift.
@@ -243,10 +285,9 @@ class MergeBlockKrigingExternalDrift(Base):
     def __init__(
         self,
         grid_location_radar="center",
-        min_obs=5,
         discretization=8,
     ):
-        Base.__init__(self, grid_location_radar, min_obs)
+        Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
