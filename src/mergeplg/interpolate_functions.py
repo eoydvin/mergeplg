@@ -190,7 +190,7 @@ def interpolate_block_kriging(
         the interpolated field.
     """
     # Calculate lengths between all points along all CMLs
-    lengths_point_l = block_points_to_lengths(x0)
+    lengths_point_l = merge_functions.block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
     cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
