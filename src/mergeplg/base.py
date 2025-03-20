@@ -136,7 +136,7 @@ class Base:
     def update_weights_(self, da_rad, da_cml=None, da_gauge=None):
         """Update radar weights for CML and gauge
 
-        This function uses the midpoint of the CML as CML reference.
+        Function uses the full CML length to sample from the radar field.
 
         Parameters
         ----------
@@ -350,125 +350,6 @@ class Base:
                     self.x0_gauge = x0_gauge.expand_dims(
                         disc=range(discretization + 1)
                     ).transpose("id", "yx", "disc")
-
-    def update_weights_block_(self, da_rad, da_cml=None, da_gauge=None):
-        """Update weights and x0 geometry for CML and gauge assuming block data
-
-        This function uses the full CML geometry and makes the rain gauge look
-        like a line with zero length.
-
-        Parameters
-        ----------
-        da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as a
-            meshgrid.
-        da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
-            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
-        da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon) as well as the projected coordinates (x, y).
-        """
-        # Check that there is radar or gauge data, if not raise an error
-        if (da_cml is None) and (da_gauge is None):
-            msg = "Please provide cml or gauge data"
-            raise ValueError(msg)
-
-        # If CML is present
-        if da_cml is not None:
-            # If intersect weights not computed, compute all weights
-            if self.intersect_weights is None:
-                self.intersect_weights = (
-                    plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-                        x1_line=da_cml.site_0_lon.data,
-                        y1_line=da_cml.site_0_lat.data,
-                        x2_line=da_cml.site_1_lon.data,
-                        y2_line=da_cml.site_1_lat.data,
-                        cml_id=da_cml.cml_id.data,
-                        x_grid=da_rad.lon.data,
-                        y_grid=da_rad.lat.data,
-                        grid_point_location=self.grid_point_location,
-                    )
-                )
-
-            # Update weights, reusing already computed weights
-            else:
-                # New cml names
-                cml_id_new = np.sort(da_cml.cml_id.data)
-
-                # cml names of previous update
-                cml_id_old = np.sort(self.intersect_weights.cml_id.data)
-
-                # Identify cml_id that is in the new and old array
-                cml_id_keep = np.intersect1d(cml_id_new, cml_id_old)
-
-                # Slice the stored intersect weights, keeping only new ones
-                self.intersect_weights = self.intersect_weights.sel(cml_id=cml_id_keep)
-
-                # Identify new cml_id
-                cml_id_not_in_old = np.setdiff1d(cml_id_new, cml_id_old)
-
-                # If new cml_ids available
-                if cml_id_not_in_old.size > 0:
-                    # Slice da_cml to get only missing coords
-                    da_cml_add = da_cml.sel(cml_id=cml_id_not_in_old)
-
-                    # Intersect, weights of CMLs to add
-                    intersect_weights_add = (
-                        plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-                            x1_line=da_cml_add.site_0_lon.data,
-                            y1_line=da_cml_add.site_0_lat.data,
-                            x2_line=da_cml_add.site_1_lon.data,
-                            y2_line=da_cml_add.site_1_lat.data,
-                            cml_id=da_cml_add.cml_id.data,
-                            x_grid=da_rad.lon.data,
-                            y_grid=da_rad.lat.data,
-                            grid_point_location=self.grid_point_location,
-                        )
-                    )
-
-                    # Add new intersect weights
-                    self.intersect_weights = xr.concat(
-                        [self.intersect_weights, intersect_weights_add], dim="cml_id"
-                    )
-
-            # Update final self.intersect_weights
-            self.intersect_weights = self.intersect_weights.sel(
-                cml_id=da_cml.cml_id.data
-            )
-
-        # If gauge data is present
-        if da_gauge is not None:
-            # If this is the first update
-            if self.gauge_ids is None:
-                # Calculate gridpoints for gauges
-                self.get_grid_at_points = plg.spatial.GridAtPoints(
-                    da_gridded_data=da_rad,
-                    da_point_data=da_gauge,
-                    nnear=1,
-                    stat="best",
-                )
-
-                # Store gauge ids, for checking in update
-                self.gauge_ids = da_gauge.id.data
-
-            else:
-                # Get names of new gauges
-                gauge_id_new = da_gauge.id.data
-
-                # Get names of gauges in previous update
-                gauge_id_old = self.gauge_ids
-
-                # Check that equal, element order is important
-                if not np.array_equal(gauge_id_new, gauge_id_old):
-                    # Calculate new gauge positions
-                    self.get_grid_at_points = plg.spatial.GridAtPoints(
-                        da_gridded_data=da_rad,
-                        da_point_data=da_gauge,
-                        nnear=1,
-                        stat="best",
-                    )
 
     def get_x0_obs_(self, da_cml=None, da_gauge=None):
         """Calculate x0 and observations from cml and rain gauge ground positions

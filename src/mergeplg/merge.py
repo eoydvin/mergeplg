@@ -10,11 +10,11 @@ from mergeplg.base import Base
 
 
 class MergeDifferenceIDW(Base):
-    """Merge CML and radar difference using IDW (CML midpoint).
+    """Merge ground and radar difference using IDW.
 
-    Merges the provided radar field in ds_rad to CML observations by
-    interpolating the difference/ratio between the ground and radar 
-    observations using IDW. 
+    Merges the provided radar field in ds_rad with gauge or CML observations
+    by interpolating the difference (additive or multiplicative) 
+    between the ground and radar observations using IDW. 
     """
 
     def __init__(
@@ -92,29 +92,6 @@ class MergeDifferenceIDW(Base):
             diff = np.where(rad>0, obs/rad, np.nan)
             keep = np.where((~np.isnan(diff)) & (diff < np.nanquantile(diff, 0.95)))[0]
 
-        # If n_closest is provided as an integer
-        if n_closest != False:
-            # Interpolate using neighbourhood block kriging
-            interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
-                xgrid,
-                ygrid,
-                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
-                x0[keep, :],
-                variogram,
-                diff[keep].size - 1 if diff[keep].size <= n_closest else n_closest,
-                max_distance=max_distance,
-            )
-
-        # If n_closest is set to False, use full kriging matrix
-        else:
-            # Interpolate using block kriging
-            interpolated = interpolate_functions.interpolate_block_kriging(
-                xgrid,
-                ygrid,
-                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
-                x0[keep, :],
-                variogram,
-            )
         
         # interpolate radar-ground difference
         adjusted = merge_functions.merge_multiplicative_idw(
@@ -160,7 +137,7 @@ class MergeAdditiveBlockKriging(Base):
         This function uses the full CML geometry and makes the gauge geometry
         appear as a rain gauge.
         """
-        self.update_weights_block_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
         self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
