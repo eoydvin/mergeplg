@@ -360,20 +360,22 @@ class MergeBlockKrigingExternalDrift(Base):
         time = da_rad.time.data[0]
 
         # Remove radar time dimension
-        da_rad_t = da_rad.sel(time=time)
+        rad_field = da_rad.sel(time=time).data
+
+        # Set zero values to nan, these are ignored in ked function
+        rad_field[rad_field <= 0] = np.nan
 
         # do addtitive IDW merging
         adjusted = merge_functions.merge_ked_blockkriging(
-            xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
+            rad_field,
+            da_rad.xs.data,
+            da_rad.ys.data,
             rad[keep],
             obs[keep],
             x0[keep],
             variogram,
             obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
         )
-
-        # Replace nan with original radar data (so that da_rad nan is kept)
-        adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted).data
 
         # Remove negative values
         adjusted[adjusted < 0] = 0

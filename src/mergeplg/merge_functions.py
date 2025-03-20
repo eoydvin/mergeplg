@@ -9,40 +9,46 @@ import pykrige
 import xarray as xr
 from scipy import stats
 
-def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram, n_closest):
-    """Merge CML and radar using an additive block kriging.
+def merge_ked_blockkriging(
+        rad_field,
+        xgrid,
+        ygrid,
+        rad, 
+        obs, 
+        x0, 
+        variogram, 
+        n_closest
+    ):
+    """Merge ground and radar using Kriging with external drift
 
-    Marges the provided radar field in ds_rad to CML observations by
-    interpolating the difference between the CML and radar observations using
-    block kriging. This takes into account the full path integrated CML
-    rainfall rate.
+    Marges the provided radar field 
 
     Parameters
     ----------
-    da_rad: xarray.DataArray
-        Gridded radar data. Must contain the x and y meshgrid given as xs
-        and ys.
-    cml_rad: numpy array
-        Radar observations at the CML locations.
-    cml_obs: numpy.array
-        CML observations.
+    rad_field: numpy.array
+        Gridded radar data curresponding to xgrid and ygrid.
+    xgrid: numpy.array
+        X-grid for radar field, as a meshgrid.
+    ygrid: numpy.array
+        Y-grid for the radar field, as a meshgrid.
+    rad: numpy array
+        Radar observations at the ground (obs) locations.
+    obs: numpy.array
+        Ground observations.
     x0: numpy.array
-        CML geometry as created by calculate_cml_geometry.
+        Ground observations geometry as created by calculate_cml_geometry.
     variogram: function
-        A user defined python function defining the variogram. Takes a distance
+        A user defined function defining the variogram. Takes a distance
         h and returns the expected variance.
     n_closest: int
-        Number of closest links to use for interpolation
+        Number of closest ground observations (obs) to use for interpolation
 
     Returns
     -------
-    da_rad_out: xarray.DataArray
-        DataArray with the same structure as the ds_rad but with the CML
-        adjusted radar field.
+    interpolated_field: numpy.array
+        Numpy array with the same structure as xgrid/ygrid containing
+        the interpolated field.
     """
-    # Grid coordinates
-    xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
-
     # Array for storing merged values
     rain = np.full(xgrid.shape, np.nan)
 
@@ -55,16 +61,16 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram, n_closest):
     mat = np.zeros([cov_block.shape[0] + 2, cov_block.shape[1] + 2])
     mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
     mat[-2, :-2] = np.ones(cov_block.shape[1])  # non-bias condition
-    mat[-1, :-2] = cml_rad  # Radar drift
+    mat[-1, :-2] = rad  # Radar drift
     mat[:-2, -2] = np.ones(cov_block.shape[0])  # lagrange multipliers
-    mat[:-2, -1] = cml_rad  # Radar drift
+    mat[:-2, -1] = rad  # Radar drift
 
     # Skip radar pixels with np.nan
-    mask = np.isnan(da_rad.data)
+    mask = np.isnan(rad_field)
 
     # Gridpoints to use
     xgrid_t, ygrid_t = xgrid[~mask], ygrid[~mask]
-    rad_field_t = da_rad.data[~mask]
+    rad_field_t = rad_field[~mask]
 
     # array for storing CML-radar merge
     estimate = np.zeros(xgrid_t.shape)
@@ -92,15 +98,11 @@ def merge_ked_blockkriging(da_rad, cml_rad, cml_obs, x0, variogram, n_closest):
         w = (a_inv @ target)[:-2]
 
         # its then the sum of the CML values (eq 8, see paragraph after eq 15)
-        estimate[i] = cml_obs[indices] @ w
+        estimate[i] = obs[indices] @ w
 
     rain[~mask] = estimate
 
-    # Create a new xarray dataset
-    ds_rad_out = da_rad.rename("R").to_dataset().copy()
-
-    ds_rad_out["adjusted_rainfall"] = (("y", "x"), rain)
-    return ds_rad_out.adjusted_rainfall
+    return rain.reshape(xgrid.shape)
 
 
 def block_points_to_lengths(x0):
