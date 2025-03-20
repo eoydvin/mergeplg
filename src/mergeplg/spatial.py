@@ -30,7 +30,7 @@ class InterpolateIDW(Base):
 
     def interpolate(
         self,
-        da_rad=None,
+        da_grid,
         da_cml=None,
         da_gauge=None,
         xgrid=None,
@@ -71,22 +71,19 @@ class InterpolateIDW(Base):
             DataArray with the same structure as the ds_rad but with the
             interpolated field. 
         """
-        # Update weights and x0 geometry for CML and gauge
-        self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        # Update x0 geometry for CML and gauge
+        self.update(da_cml=da_cml, da_gauge=da_gauge)
 
-        # Evaluate radar at cml and gauge ground positions
+        # Get ground observations and x0 geometry
         obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
 
-        # Get radar grid as numpy arrays
-        xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
-
-        # do addtitive IDW merging
-        interpolated = merge_functions.merge_multiplicative_idw(
-            xgrid, 
-            ygrid,
+        # Do addtitive IDW merging
+        interpolated = interpolate_functions.interpolate_idw(
+            ds_grid.xs.data, 
+            ds_grid.ys.data,
             diff[keep],
             x0[keep, :],
             p=p,
@@ -96,7 +93,7 @@ class InterpolateIDW(Base):
         )
 
         return xr.DataArray(
-            data=interpolated,
+            data=[interpolated],
             coords=da_rad.coords,
             dims=da_rad.dims
         )
@@ -179,7 +176,7 @@ class InterpolateBlockKriging(Base):
         # Update x0 geometry for CML and gauge
         self.update(da_cml=da_cml, da_gauge=da_gauge)
 
-        # Evaluate radar at cml and gauge ground positions
+        # Get ground observations and x0 geometry
         obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
@@ -204,6 +201,7 @@ class InterpolateBlockKriging(Base):
             interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
                 xgrid,
                 ygrid,
+                # If full_line is false, use approximate midpoint coordinate of CML
                 obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
                 x0[keep, :],
                 variogram,
@@ -217,6 +215,7 @@ class InterpolateBlockKriging(Base):
             interpolated = interpolate_functions.interpolate_block_kriging(
                 xgrid,
                 ygrid,
+                # If full_line is false, use approximate midpoint coordinate of CML
                 obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
                 x0[keep, :],
                 variogram,
