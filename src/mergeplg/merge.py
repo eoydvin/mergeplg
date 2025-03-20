@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 
 from mergeplg import merge_functions
+from mergeplg import interpolate_functions
 from mergeplg.base import Base
 
 
@@ -88,14 +89,21 @@ class MergeDifferenceIDW(Base):
         if method == 'additive':
             diff = np.where(rad>0, obs- rad, np.nan)
             keep = np.where(~np.isnan(diff))[0]
-        elif method = 'multiplicative':
-            diff = np.where(rad>0, obs/rad, np.nan)
+
+        elif method == 'multiplicative':
+            mask_zero = rad > 0.0
+            diff = np.full_like(obs, np.nan, dtype=np.float64)
+            diff[mask_zero] = obs[mask_zero]/rad[mask_zero]
             keep = np.where((~np.isnan(diff)) & (diff < np.nanquantile(diff, 0.95)))[0]
 
-        
-        # interpolate radar-ground difference
-        adjusted = merge_functions.merge_multiplicative_idw(
-            xr.where(da_rad_t > 0, da_rad_t, np.nan),  # function skips nan
+        else:
+            msg = "Method must be multiplicative or additive"
+            raise ValueError(msg)
+
+        # Interpolate the difference
+        interpolated = interpolate_functions.interpolate_idw(
+            da_rad.xs.data, 
+            da_rad.ys.data,
             diff[keep],
             x0[keep, :],
             p=p,
@@ -103,12 +111,21 @@ class MergeDifferenceIDW(Base):
             nnear=nnear,
             max_distance=max_distance,
         )
+        
+        # Adjust radar field
+        if method == 'additive':
+            adjusted = interpolated + da_rad.isel(time = 0).data
+        elif method == 'multiplicative':
+            adjusted = interpolated*da_rad.isel(time = 0).data
 
-        # Replace nan with original radar data (so that da_rad nan is kept)
-        adjusted = xr.where(np.isnan(adjusted), da_rad_t, adjusted)
+        # Remove negative values
+        adjusted[adjusted < 0] = 0
 
-        # Re-assign timestamp and return
-        return adjusted.assign_coords(time=time)
+        return xr.DataArray(
+            data=[adjusted],
+            coords=da_rad.coords,
+            dims=da_rad.dims
+        )
 
 class MergeAdditiveBlockKriging(Base):
     """Merge CML and radar using additive block kriging

@@ -17,7 +17,7 @@ def interpolate_idw(
 ):
     """Interpolate observations using IDW
 
-    Interpolate CML and rain gauge data usgin Invdisttree from radolan.
+    Interpolate CML and rain gauge data using Invdisttree from Radolan.
 
     Parameters
     ----------
