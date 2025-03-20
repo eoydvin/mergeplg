@@ -21,14 +21,11 @@ class Base:
     def __init__(
         self,
         grid_point_location="center",
-        min_obs=5,
     ):
         """Construct merge class
 
         Parameters
         ----------
-        self.min_obs: int
-            Number of observations required to perform adjustment.
         self.grid_point_location str
             Radar grid cell reference position. For instance 'center'.
         self.intersect_weights xarray.Dataset
@@ -43,9 +40,6 @@ class Base:
         self.x0_gauge xarray.DataArray
             Rain gauge coordinates.
         """
-        # Number of observations required to do radar adjustment
-        self.min_obs_ = min_obs
-
         # Location of grid point for weather radar, used in intersect weights
         self.grid_point_location = grid_point_location
 

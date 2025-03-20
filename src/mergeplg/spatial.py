@@ -17,7 +17,6 @@ class InterpolateIDW(Base):
     def __init__(
         self,
         grid_location_radar="center",
-        min_obs=1,
     ):
         Base.__init__(self, grid_location_radar, min_obs)
 
@@ -84,46 +83,41 @@ class InterpolateIDW(Base):
         # Get radar grid as numpy arrays
         xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
 
-        # Check that that there is enough observations
-        if keep.size > self.min_obs_:
-            # do addtitive IDW merging
-            interpolated = merge_functions.merge_multiplicative_idw(
-                xgrid, 
-                ygrid,
-                diff[keep],
-                x0[keep, :],
-                p=p,
-                idw_method=idw_method,
-                nnear=nnear,
-                max_distance=max_distance,
-            )
-            return xr.DataArray(
-                data=interpolated,
-                coords=da_rad.coords,
-                dims=da_rad.dims
-            )
+        # do addtitive IDW merging
+        interpolated = merge_functions.merge_multiplicative_idw(
+            xgrid, 
+            ygrid,
+            diff[keep],
+            x0[keep, :],
+            p=p,
+            idw_method=idw_method,
+            nnear=nnear,
+            max_distance=max_distance,
+        )
 
-        # Else return zeros
-        return  xr.DataArray(
-            data=np.zeros(xgrid.shape),
+        return xr.DataArray(
+            data=interpolated,
             coords=da_rad.coords,
             dims=da_rad.dims
         )
 
-class InterpolateNeighbourhoodBlockKriging(Base):
+class InterpolateBlockKriging(Base):
     """Interpolate CML and radar using neighbourhood block kriging
 
-    Interpolates the provided CML and rain gauge observations using neibourhood
-    block kriging.
+    Interpolates the provided CML and rain gauge observations using 
+    block kriging. The class defaults to interpolation using neighbouring 
+    observations, but in can also consider all observations by setting 
+    n_closest to False. It also by default uses the full line geometry for 
+    interpolation, but can treat the lins as boints by setting full_line
+    to False. 
     """
 
     def __init__(
         self,
         grid_location_radar="center",
-        min_obs=5,
         discretization=8,
     ):
-        Base.__init__(self, grid_location_radar, min_obs)
+        Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
@@ -141,12 +135,13 @@ class InterpolateNeighbourhoodBlockKriging(Base):
 
     def interpolate(
         self, 
-        da_rad, 
+        da_grid, 
         da_cml=None, 
         da_gauge=None, 
         variogram="exponential", 
-        n_closest=8,
+        nnear=8,
         max_distance=60000,
+        full_line = True,
     ):
         """Interpolate observations for one time step.
 
@@ -162,13 +157,18 @@ class InterpolateNeighbourhoodBlockKriging(Base):
             CML observations. Must contain the projected midpoint 
             coordinates (x, y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates projected 
+            Gauge observations. Must contain the projected 
             coordinates (x, y).
         variogram: function or str
             If function: Must return expected variance given distance between
             observations. If string: Must be a valid variogram type in pykrige.
-        n_closest: int
+        nnear: int
             Number of closest links to use for interpolation
+        max_distance: float
+            Largest distance allowed for including an observation.
+        full_line: bool
+            Wether to use the full line for block kriging. If set to false, the 
+            x0 geometry is reformated to simply reflect the midpoint of the CML. 
 
         Returns
         -------
@@ -188,39 +188,42 @@ class InterpolateNeighbourhoodBlockKriging(Base):
         # Get radar grid as numpy arrays
         xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
 
-        # Check that that there is enough observations
-        if keep.size > self.min_obs_:
-            # If variogram provided as string, estimate from ground obs.
-            if isinstance(variogram, str):
-                # Estimate variogram
-                param = merge_functions.estimate_variogram(
-                    obs=obs[keep],
-                    x0=x0[keep],
-                )
+        # If variogram provided as string, estimate from ground obs.
+        if isinstance(variogram, str):
+            # Estimate variogram
+            param = interpolate_functions.estimate_variogram(
+                obs=obs[keep],
+                x0=x0[keep],
+            )
 
-                variogram, self.variogram_param = param
+            variogram, self.variogram_param = param
 
-            # do addtitive IDW merging
+        # If n_closest is provided as an integer
+        if nnear != False:
+            # Interpolate using neighbourhood block kriging
             interpolated = interpolate_functions.interpolate_neighbourhood_block_kriging(
                 xgrid,
                 ygrid,
-                obs[keep]
+                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
                 x0[keep, :],
                 variogram,
-                diff[keep].size - 1 if diff[keep].size <= n_closest else n_closest,
+                diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
                 max_distance=max_distance,
             )
-            
-            return xr.DataArray(
-                data=interpolated,
-                coords=da_rad.coords,
-                dims=da_rad.dims
-            )
 
-        # Else return zeros
-        return  xr.DataArray(
-            data=np.zeros(xgrid.shape),
+        # If n_closest is set to False, use full kriging matrix
+        else:
+            # Interpolate using block kriging
+            interpolated = interpolate_functions.interpolate_block_kriging(
+                xgrid,
+                ygrid,
+                obs[keep] if full_line else x0[keep, :, [int(x0.shape[1] / 2)]]
+                x0[keep, :],
+                variogram,
+            )
+        
+        return xr.DataArray(
+            data=[interpolated],
             coords=da_rad.coords,
             dims=da_rad.dims
         )
-

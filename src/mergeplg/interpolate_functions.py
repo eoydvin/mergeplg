@@ -13,7 +13,7 @@ from .radolan import idw
 
 
 def interpolate_idw(
-    xgrid, ygrid, obs, x0, p=2, idw_method="radolan", n_closest=8, max_distance=60000
+    xgrid, ygrid, obs, x0, p=2, idw_method="radolan", nnear=8, max_distance=60000
 ):
     """Interpolate observations using IDW
 
@@ -34,7 +34,7 @@ def interpolate_idw(
         IDW interpolation parameter
     idw_method: str
         by default "radolan"
-    n_closest: int
+    nnear: int
         number of neighbours to use for interpolation
     max_distance: float
         Max allowed distance for including a observation
@@ -56,7 +56,7 @@ def interpolate_idw(
     interpolated = idw_interpolator(
         q=coord_pred,
         z=obs,
-        nnear=obs.size if obs.size <= n_closest else n_closest,
+        nnear=obs.size if obs.size <= nnear else nnear,
         p=p,
         idw_method=idw_method,
         max_distance=max_distance,
@@ -72,7 +72,7 @@ def interpolate_neighbourhood_block_kriging(
         obs, 
         x0, 
         variogram, 
-        n_closest,
+        nnear,
         max_distance=60000,
     ):
     """Interpolate observations using neighbourhood block kriging
@@ -96,7 +96,7 @@ def interpolate_neighbourhood_block_kriging(
     variogram: function
         A user defined python function defining the variogram. Takes a distance
         h and returns the expected variance.
-    n_closest: int
+    nnear: int
         Number of neighbors to use for interpolation
     max_distance: float
         Max allowed distance for including a observation
@@ -136,7 +136,7 @@ def interpolate_neighbourhood_block_kriging(
         length[lengths > max_distance] = np.nan
 
         # Get the n closest links
-        indices = np.argpartition(np.nanmin(lengths, axis=1), n_closest)[:n_closest]
+        indices = np.argpartition(np.nanmin(lengths, axis=1), nnear)[:nnear]
         ind_mat = np.append(indices, mat.shape[0] - 1)
 
         # Calc the inverse, only dependent on geometry
