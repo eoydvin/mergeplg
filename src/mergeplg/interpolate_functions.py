@@ -77,9 +77,9 @@ def interpolate_neighbourhood_block_kriging(
     ):
     """Interpolate observations using neighbourhood block kriging
 
-    Interpolate CML and rain gauge data using an implementation of 
-    block kriging as outlined in Goovaerts, P. (2008). Kriging and 
-    Semivariogram Deconvolution in the Presence of Irregular 
+    Interpolate CML and rain gauge data using an neigbourhood based 
+    implementation of block kriging as outlined in Goovaerts, P. (2008). 
+    Kriging and Semivariogram Deconvolution in the Presence of Irregular 
     Geographical Units. Mathematical Geosciences, 40, 101–128. 
     https://doi.org/10.1007/s11004-007-9129-1
 
@@ -100,6 +100,7 @@ def interpolate_neighbourhood_block_kriging(
         Number of neighbors to use for interpolation
     max_distance: float
         Max allowed distance for including a observation
+
     Returns
     -------
     interpolated_field: numpy.array
@@ -162,12 +163,16 @@ def interpolate_block_kriging(
         obs, 
         x0, 
         variogram, 
-        n_closest=8,
         max_distance=60000,
     ):
-    """Interpolate observations using Block Kriging
+    """Interpolate observations using block kriging
 
-    Interpolate CML and rain gauge data using an implementation of block kriging.
+    Interpolate CML and rain gauge data using an implementation of 
+    block kriging as outlined in Goovaerts, P. (2008). Kriging and 
+    Semivariogram Deconvolution in the Presence of Irregular 
+    Geographical Units. Mathematical Geosciences, 40, 101–128. 
+    https://doi.org/10.1007/s11004-007-9129-1
+
 
     Parameters
     ----------
@@ -178,30 +183,17 @@ def interpolate_block_kriging(
     obs: numpy.array
         Observations to interpolate
     x0: numpy.array
-        Coordinates of observations given as [[obs_1_y, obs_1_x], ..
-        [obs_n_y, obs_n_x] using the same order as obs.
-    p: float
-        IDW interpolation parameter
-    idw_method: str
-        by default "radolan"
-    nnear: int
-        number of neighbours to use for interpolation
-    max_distance: float
-        max distance allowed interpolation distance
+        CML geometry as created by calculate_cml_geometry.
+    variogram: function
+        A user defined python function defining the variogram. Takes a distance
+        h and returns the expected variance.
 
     Returns
     -------
     interpolated_field: numpy.array
         Numpy array with the same structure as xgrid/ygrid containing
         the interpolated field.
-
     """
-    # Grid coordinates
-    xgrid, ygrid = da_rad.xs.data, da_rad.ys.data
-
-    # Array for storing interpolated values
-    shift = np.full(xgrid.shape, np.nan)
-
     # Calculate lengths between all points along all CMLs
     lengths_point_l = block_points_to_lengths(x0)
 
@@ -213,32 +205,24 @@ def interpolate_block_kriging(
     mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
     mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
     mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
-
-    # Skip radar pixels with np.nan
-    mask = np.isnan(da_rad.data)
+    
+    # Invert the kriging matrix
+    a_inv = np.linalg.pinv(mat)
 
     # Grid to visit
-    xgrid_t, ygrid_t = xgrid[~mask], ygrid[~mask]
+    xgrid_t, ygrid_t = xgrid.ravel(), ygrid.ravel()
 
     # array for storing CML-radar merge
     estimate = np.zeros(xgrid_t.shape)
 
     # Compute the contributions from all CMLs to points in grid
     for i in range(xgrid_t.size):
-        # Compute lengths between all points along all links
         delta_x = x0[:, 1] - xgrid_t[i]
         delta_y = x0[:, 0] - ygrid_t[i]
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
-        # Get the n closest links
-        indices = np.argpartition(lengths.min(axis=1), n_closest)[:n_closest]
-        ind_mat = np.append(indices, mat.shape[0] - 1)
-
-        # Calc the inverse, only dependent on geometry
-        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
-
         # Estimate expected variance for all links
-        target = variogram(lengths[indices]).mean(axis=1)
+        target = variogram(lengths).mean(axis=1)
 
         # Add non bias condition
         target = np.append(target, 1)
@@ -247,28 +231,10 @@ def interpolate_block_kriging(
         w = (a_inv @ target)[:-1]
 
         # Estimate rainfall amounts at location i
-        estimate[i] = cml_diff[indices] @ w
+        estimate[i] = obs @ w
 
-    # Store shift values
-    shift[~mask] = estimate
-
-    # create xarray object similar to ds_rad
-    ds_rad_out = da_rad.rename("R").to_dataset().copy()
-
-    # Set areas with nan to zero
-    shift[np.isnan(shift)] = 0
-
-    # Do adjustment
-    adjusted = shift + ds_rad_out.R.data
-
-    # Set negative values to zero
-    adjusted = np.where(adjusted > 0, adjusted, 0)
-
-    # Store shift data
-    ds_rad_out["adjusted_rainfall"] = (("y", "x"), adjusted)
-
-    # Return dataset with adjusted values
-    return ds_rad_out.adjusted_rainfall
+    # Return dataset with interpolated values
+    return estimate.reshape(xgrid.shape)
 
 def estimate_variogram(obs, x0, variogram_model="exponential"):
     """Estimate variogram from CML and/or rain gauge data
