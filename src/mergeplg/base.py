@@ -6,6 +6,7 @@ import numpy as np
 import poligrain as plg
 import xarray as xr
 
+
 class Base:
     """Update weights and geometry and evaluate radar at CMLs and rain gauges
 
@@ -280,9 +281,7 @@ class Base:
             # If intersect weights not computed, compute all weights
             if self.x0_cml is None:
                 # CML coordinates along all links
-                self.x0_cml = calculate_cml_line(
-                    da_cml, discretization=discretization
-                )
+                self.x0_cml = calculate_cml_line(da_cml, discretization=discretization)
 
             # Update weights, reusing already computed weights
             else:
@@ -350,7 +349,7 @@ class Base:
 
     def get_obs_x0_(self, da_cml=None, da_gauge=None):
         """Calculate ground observations and x0 for current state
-        
+
         Returns and ordered list of x0 geometry and ground observations
 
         Parameters
@@ -400,11 +399,12 @@ class Base:
 
         # Return radar, observations and coordinates
         return observations_ground, x0
-    
+
     def get_rad_obs_x0_(self, da_rad, da_cml=None, da_gauge=None):
         """Calculate radar, ground observation and x0 for current state
 
         Returns and ordered list of radar, ground observations and x0 geometry
+
         Parameters
         ----------
         da_rad: xarray.DataArray
@@ -489,6 +489,7 @@ class Base:
 
         # Return radar, observations and coordinates
         return observations_radar, observations_ground, x0
+
 
 # Functions for setting up x0 for gauges and CMLs
 def calculate_cml_line(ds_cmls, discretization=8):

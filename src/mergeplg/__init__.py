@@ -9,4 +9,4 @@ __version__ = "0.0.0"
 
 __all__ = ["__version__", "io", "radolan", "merge", "interpolate"]
 
-from . import io, merge, radolan, interpolate
+from . import interpolate, io, merge, radolan

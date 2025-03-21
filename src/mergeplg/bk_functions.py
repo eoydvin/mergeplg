@@ -5,21 +5,23 @@ Created on Fri Oct 18 20:21:53 2024
 """
 
 import numpy as np
+import pykrige
+
 
 def interpolate_neighbourhood_block_kriging(
-        xgrid, 
-        ygrid, 
-        obs, 
-        x0, 
-        variogram, 
-        nnear,
-    ):
+    xgrid,
+    ygrid,
+    obs,
+    x0,
+    variogram,
+    nnear,
+):
     """Interpolate observations using neighbourhood block kriging
 
-    Interpolate CML and rain gauge data using an neigbourhood based 
-    implementation of block kriging as outlined in Goovaerts, P. (2008). 
-    Kriging and Semivariogram Deconvolution in the Presence of Irregular 
-    Geographical Units. Mathematical Geosciences, 40, 101–128. 
+    Interpolate CML and rain gauge data using an neighbourhood based
+    implementation of block kriging as outlined in Goovaerts, P. (2008).
+    Kriging and Semivariogram Deconvolution in the Presence of Irregular
+    Geographical Units. Mathematical Geosciences, 40, 101 - 128.
     https://doi.org/10.1007/s11004-007-9129-1
 
     Parameters
@@ -27,7 +29,7 @@ def interpolate_neighbourhood_block_kriging(
     xgrid numpy.array
         x coordinates as a meshgrid
     ygrid numpy array
-        y coodrinates as a meshgrid
+        y coordinates as a meshgrid
     obs: numpy.array
         Observations to interpolate
     x0: numpy.array
@@ -41,11 +43,10 @@ def interpolate_neighbourhood_block_kriging(
     Returns
     -------
     interpolated_field: numpy.array
-        Numpy array with the same structure as xgrid/ygrid containing
+        Array with the same structure as xgrid and ygrid containing
         the interpolated field.
 
     """
-
     # Calculate lengths between all points along all CMLs
     lengths_point_l = block_points_to_lengths(x0)
 
@@ -93,19 +94,20 @@ def interpolate_neighbourhood_block_kriging(
     # Return dataset with interpolated values
     return estimate.reshape(xgrid.shape)
 
+
 def interpolate_block_kriging(
-        xgrid, 
-        ygrid, 
-        obs, 
-        x0, 
-        variogram, 
-    ):
+    xgrid,
+    ygrid,
+    obs,
+    x0,
+    variogram,
+):
     """Interpolate observations using block kriging
 
-    Interpolate CML and rain gauge data using an implementation of 
-    block kriging as outlined in Goovaerts, P. (2008). Kriging and 
-    Semivariogram Deconvolution in the Presence of Irregular 
-    Geographical Units. Mathematical Geosciences, 40, 101–128. 
+    Interpolate CML and rain gauge data using an implementation of
+    block kriging as outlined in Goovaerts, P. (2008). Kriging and
+    Semivariogram Deconvolution in the Presence of Irregular
+    Geographical Units. Mathematical Geosciences, 40, 101 - 128.
     https://doi.org/10.1007/s11004-007-9129-1
 
 
@@ -114,7 +116,7 @@ def interpolate_block_kriging(
     xgrid numpy.array
         x coordinates as a meshgrid
     ygrid numpy array
-        y coodrinates as a meshgrid
+        y coordinates as a meshgrid
     obs: numpy.array
         Observations to interpolate
     x0: numpy.array
@@ -126,7 +128,7 @@ def interpolate_block_kriging(
     Returns
     -------
     interpolated_field: numpy.array
-        Numpy array with the same structure as xgrid/ygrid containing
+        Array with the same structure as xgrid/ygrid containing
         the interpolated field.
     """
     # Calculate lengths between all points along all CMLs
@@ -140,7 +142,7 @@ def interpolate_block_kriging(
     mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
     mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
     mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
-    
+
     # Invert the kriging matrix
     a_inv = np.linalg.pinv(mat)
 
@@ -171,24 +173,16 @@ def interpolate_block_kriging(
     # Return dataset with interpolated values
     return estimate.reshape(xgrid.shape)
 
-def merge_ked_blockkriging(
-        rad_field,
-        xgrid,
-        ygrid,
-        rad, 
-        obs, 
-        x0, 
-        variogram, 
-        n_closest
-    ):
+
+def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_closest):
     """Merge ground and radar using Kriging with external drift
 
-    Marges the provided radar field 
+    Marges the provided radar field
 
     Parameters
     ----------
     rad_field: numpy.array
-        Gridded radar data curresponding to xgrid and ygrid.
+        Gridded radar data corresponding to xgrid and ygrid.
     xgrid: numpy.array
         X-grid for radar field, as a meshgrid.
     ygrid: numpy.array
@@ -208,7 +202,7 @@ def merge_ked_blockkriging(
     Returns
     -------
     interpolated_field: numpy.array
-        Numpy array with the same structure as xgrid/ygrid containing
+        Array with the same structure as xgrid/ygrid containing
         the interpolated field.
     """
     # Array for storing merged values
@@ -327,3 +321,38 @@ def block_points_to_lengths(x0):
     )
 
 
+def construct_variogram(
+    obs,
+    x0,
+    variogram_parameters,
+    variogram_model,
+):
+    """Construct variogram
+
+    Construct the variogram using pykrige variogram model and parameters
+    provided by user.
+
+    Returns
+    -------
+    variogram: function
+        Variogram function that returns the expected variance given the
+        distance between observations.
+
+    """
+    # If x0 contains block data, get approximate midpoints
+    if len(x0.shape) > 2:
+        x0 = x0[:, :, int(x0.shape[1] / 2)]
+
+    ok = pykrige.OrdinaryKriging(
+        x0[:, 1],  # x-midpoint coordinate
+        x0[:, 0],  # y-midpoint coordinate
+        obs,
+        variogram_parameters=variogram_parameters,
+        variogram_model=variogram_model,
+    )
+
+    # Construct variogram using pykrige
+    def variogram(h):
+        return ok.variogram_function(ok.variogram_model_parameters, h)
+
+    return variogram
