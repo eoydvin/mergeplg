@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-from mergeplg import bk_functions
 import mergeplg
+from mergeplg import bk_functions
 
 ds_cmls = xr.Dataset(
     data_vars={
@@ -124,4 +124,3 @@ def test_block_points_to_lengths():
             ]
         )
     ).all()
-

@@ -340,7 +340,6 @@ def test_MergeBlockKrigingExternalDrift():
 
     # Initialize highlevel-class
     merge_KED = merge.MergeBlockKrigingExternalDrift(
-        min_obs=1,  # We use few obs in this test
         discretization=8,
     )
 
@@ -366,45 +365,22 @@ def test_MergeBlockKrigingExternalDrift():
     assert (merge_KED.x0_gauge.isel(yx=1) == da_gauges_t1.x).all()
     assert (merge_KED.x0_gauge.isel(yx=0) == da_gauges_t1.y).all()
 
-    # Test that automatic variogram estimation and transformation function works
+    # Test that adjusted field is the same
     adjusted = merge_KED.adjust(
         da_rad_t,
         da_cml=da_cml_t1,
         da_gauge=da_gauges_t1,
-        variogram="exponential",
     )
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [6.8837209, 4.7383721, 6.8837209, 6.8837209],
-            [6.8837209, 6.8837209, 4.7383721, 9.2616279],
-            [6.8837209, 5.0, 9.2383721, 4.7616279],
-            [6.8837209, 9.0, 7.1162791, 9.0],
-        ]
-    )
-
-    np.testing.assert_almost_equal(adjusted, data_check)
-
-    # Simple linear variogram and transformation functions for testing
-    def variogram(h):
-        return h
-
-    # Adjust field
-    adjusted = merge_KED.adjust(
-        da_rad_t,
-        da_cml=da_cml_t1,
-        da_gauge=da_gauges_t1,
-        variogram=variogram,
-    )
-
-    # test that the adjusted field is the same as first run
-    data_check = np.array(
-        [
-            [1.2673279, 0.9159766, 2.8557292, 5.2944255],
-            [2.5462022, 2.7732177, 4.7644577, 6.2127718],
-            [4.7542038, 5.0, 9.1808035, 7.4418168],
-            [7.4271479, 7.2153635, 10.724253, 9.0],
+            [
+                [1.2673287, 0.9159769, 2.8557295, 5.2944258],
+                [2.5462025, 2.7732178, 4.7644576, 6.212772],
+                [4.754204, 5.0, 9.1808035, 7.4418169],
+                [7.427148, 7.2153637, 10.7242529, 9.0],
+            ]
         ]
     )
 
@@ -422,7 +398,7 @@ def test_MergeBlockKrigingExternalDrift():
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
+        grid_data=adjusted,
         intersect_weights=intersect_weights,
     )
 
@@ -475,16 +451,17 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad_t,
         da_cml=da_cml_t2,
         da_gauge=da_gauges_t2,
-        variogram=variogram,
     )
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [-2.6950506, 0.7627281, 6.0610102, 6.9895002],
-            [-0.9672861, 0.754008, 5.2116101, 6.7336794],
-            [3.7761221, 5.0, 1.0, 5.5185573],
-            [4.2335087, 4.0556517, 1.2108774, 3.4961416],
+            [
+                [0.0, 0.7627284, 6.0610101, 6.9894997],
+                [0.0, 0.754008, 5.2116101, 6.7336792],
+                [3.776122, 5.0, 1.0, 5.5185572],
+                [4.2335083, 4.0556515, 1.2108775, 3.4961415],
+            ]
         ]
     )
 
@@ -502,7 +479,7 @@ def test_MergeBlockKrigingExternalDrift():
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
+        grid_data=adjusted,
         intersect_weights=intersect_weights,
     )
 
@@ -533,7 +510,6 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad_t,
         da_cml=None,
         da_gauge=da_gauges_t2,
-        variogram=variogram,
     )
 
     # Test adjusted field at rain gauges
@@ -553,7 +529,6 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad_t,
         da_cml=da_cml_t2,
         da_gauge=None,
-        variogram=variogram,
     )
 
     # calculate the adjusted field along CMLs
@@ -568,7 +543,7 @@ def test_MergeBlockKrigingExternalDrift():
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
+        grid_data=adjusted,
         intersect_weights=intersect_weights,
     )
 
@@ -578,17 +553,3 @@ def test_MergeBlockKrigingExternalDrift():
         da_cml_t2.data.ravel(),
         decimal=0,  # not very precise, but decent
     )
-
-    # Test that da_rad is return if too few obs is provided
-    merge_KED.min_obs_ = 10
-    adjusted = merge_KED.adjust(
-        da_rad_t,
-        da_cml=da_cml_t2,
-        da_gauge=None,
-        variogram=variogram,
-    )
-    np.testing.assert_almost_equal(
-        adjusted.data,
-        da_rad_t.data,
-    )
-    merge_KED.min_obs_ = 1  # reset
