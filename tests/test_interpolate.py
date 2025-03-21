@@ -4,7 +4,7 @@ import numpy as np
 import poligrain as plg
 import xarray as xr
 
-from mergeplg import merge
+from mergeplg import interpolate
 
 ds_cmls = xr.Dataset(
     data_vars={
@@ -55,18 +55,17 @@ ds_rad = xr.Dataset(
 )
 
 
-def test_MergeDifferenceIDW():
+def test_InterpolateBlockKriging():
     # CML and rain gauge overlapping sets
     da_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=[0]).R
     da_cml_t2 = ds_cmls.isel(cml_id=[1, 0], time=[0]).R
     da_gauges_t1 = ds_gauges.isel(id=[2, 1], time=[0]).R
     da_gauges_t2 = ds_gauges.isel(id=[1, 0], time=[0]).R
 
-    # Select radar timestep
-    da_rad_t = ds_rad.isel(time=[0]).R
-
+    da_grid = ds_rad.isel(time=[0]).R
+    
     # Initialize highlevel-class
-    merge_IDW = merge.MergeDifferenceIDW()
+    merge_krig = interpolate.InterpolateBlockKriging()
 
     # Adjust field
     adjusted = merge_IDW.adjust(
