@@ -187,7 +187,7 @@ class InterpolateBlockKriging(Base):
 
         # Force interpolator to use only midpoint
         if full_line is False:
-            x0 = x0[keep, :, [int(x0.shape[1] / 2)]]
+            x0 = x0[:, :, [int(x0.shape[2] / 2)]]
 
         # Construct variogram using parameters provided by user
         variogram = bk_functions.construct_variogram(
@@ -211,7 +211,7 @@ class InterpolateBlockKriging(Base):
                 obs[keep],
                 x0[keep],
                 variogram,
-                obs[keep].size - 1 if obs[keep].size <= nnear else nnear,
+                obs[keep].size if obs[keep].size <= nnear else nnear,
             )
 
         return xr.DataArray(

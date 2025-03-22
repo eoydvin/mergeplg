@@ -245,7 +245,7 @@ class MergeDifferenceBlockKriging(Base):
             keep = keep_function([diff, rad, obs, x0])
 
         # Force interpolator to use only midpoint, if specified by user
-        x0 = x0[keep, :, [int(x0.shape[1] / 2)]] if full_line is False else x0
+        x0 = x0[keep, :, [int(x0.shape[2] / 2)]] if full_line is False else x0
 
         # Construct variogram using parameters provided by user
         variogram = bk_functions.construct_variogram(
@@ -270,7 +270,7 @@ class MergeDifferenceBlockKriging(Base):
                 diff[keep],
                 x0[keep],
                 variogram,
-                diff[keep].size - 1 if diff[keep].size <= nnear else nnear,
+                diff[keep].size if diff[keep].size <= nnear else nnear,
             )
 
         # Adjust radar field
@@ -375,8 +375,8 @@ class MergeBlockKrigingExternalDrift(Base):
 
         # Setup pykrige with variogram parameters provided by user
         ok = pykrige.OrdinaryKriging(
-            x0[keep, 1, int(x0.shape[1] / 2)],  # x-midpoint coordinate
-            x0[keep, 0, int(x0.shape[1] / 2)],  # y-midpoint coordinate
+            x0[keep, 1, int(x0.shape[2] / 2)],  # x-midpoint coordinate
+            x0[keep, 0, int(x0.shape[2] / 2)],  # y-midpoint coordinate
             obs[keep],
             variogram_model=variogram_model,
             variogram_parameters=variogram_parameters,
@@ -401,7 +401,7 @@ class MergeBlockKrigingExternalDrift(Base):
             obs[keep],
             x0[keep],
             variogram,
-            obs[keep].size - 1 if obs[keep].size <= n_closest else n_closest,
+            obs[keep].size if obs[keep].size <= n_closest else n_closest,
         )
 
         # Remove negative values

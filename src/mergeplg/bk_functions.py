@@ -73,7 +73,7 @@ def interpolate_neighbourhood_block_kriging(
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Get the n closest links
-        indices = np.argpartition(np.nanmin(lengths, axis=1), nnear)[:nnear]
+        indices = np.argpartition(np.nanmin(lengths, axis=1), nnear - 1)[:nnear]
         ind_mat = np.append(indices, mat.shape[0] - 1)
 
         # Calc the inverse, only dependent on geometry
@@ -239,7 +239,7 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Get the n closest links
-        indices = np.argpartition(lengths.min(axis=1), n_closest)[:n_closest]
+        indices = np.argpartition(lengths.min(axis=1), n_closest - 1)[:n_closest]
         ind_mat = np.append(indices, [mat.shape[0] - 2, mat.shape[0] - 1])
 
         # Calc the inverse, only dependent on geometry
@@ -341,7 +341,7 @@ def construct_variogram(
     """
     # If x0 contains block data, get approximate midpoints
     if len(x0.shape) > 2:
-        x0 = x0[:, :, int(x0.shape[1] / 2)]
+        x0 = x0[:, :, int(x0.shape[2] / 2)]
 
     ok = pykrige.OrdinaryKriging(
         x0[:, 1],  # x-midpoint coordinate
