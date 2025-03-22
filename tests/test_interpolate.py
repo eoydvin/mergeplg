@@ -66,19 +66,8 @@ def test_blockkriging_vs_pykrige():
     interpolate_krig = interpolate.InterpolateBlockKriging()
 
     variogram_model = "spherical"
-    variogram_parameters = {"sill": 0.9, "range": 2, "nugget": 0.1}
+    variogram_parameters = {"sill": 0.8, "range": 5, "nugget": 0}
 
-    # Interpolate field
-    interp_field = interpolate_krig.interpolate(
-        da_grid,
-        da_cml=da_cml_t1,
-        da_gauge=da_gauges_t1,
-        variogram_model=variogram_model,
-        variogram_parameters=variogram_parameters,
-        nnear=8,
-        full_line=False,
-    )
-    print(np.round(interp_field.data, 5))
     # Interpolate field
     interp_field = interpolate_krig.interpolate(
         da_grid,
@@ -89,8 +78,7 @@ def test_blockkriging_vs_pykrige():
         nnear=False,
         full_line=False,
     )
-    print(np.round(interp_field.data, 5))
-    print("aiai")
+
     # Get ground observations and x0 geometry
     obs, x0 = interpolate_krig.get_obs_x0_(da_cml=da_cml_t1, da_gauge=da_gauges_t1)
 
@@ -102,13 +90,15 @@ def test_blockkriging_vs_pykrige():
         variogram_model=variogram_model,
         variogram_parameters=variogram_parameters,
         pseudo_inv=True,
+        exact_values=False,  # Account for nugget when predicting
     )
 
     z, ss = ok.execute(
         "points",
-        da_grid.xs.data.ravel().astype(float),
         da_grid.ys.data.ravel().astype(float),
+        da_grid.xs.data.ravel().astype(float),
     )
+
     interp_field_pykrige = [z.reshape(da_grid.xs.shape)]
-    print(np.round(interp_field.data, 5))
-    print(np.round(interp_field_pykrige, 5))
+
+    np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
