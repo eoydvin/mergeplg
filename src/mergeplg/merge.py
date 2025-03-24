@@ -245,7 +245,7 @@ class MergeDifferenceBlockKriging(Base):
             keep = keep_function([diff, rad, obs, x0])
 
         # Force interpolator to use only midpoint, if specified by user
-        x0 = x0[keep, :, [int(x0.shape[2] / 2)]] if full_line is False else x0
+        x0 = x0[:, :, [int(x0.shape[2] / 2)]] if full_line is False else x0
 
         # Construct variogram using parameters provided by user
         variogram = bk_functions.construct_variogram(
