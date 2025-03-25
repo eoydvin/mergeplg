@@ -63,7 +63,7 @@ def test_blockkriging_vs_pykrige():
     da_grid = ds_rad.isel(time=[0]).R
 
     # Initialize highlevel-class
-    interpolate_krig = interpolate.InterpolateBlockKriging()
+    interpolate_krig = interpolate.InterpolateOrdinaryKriging(min_observations=2)
 
     variogram_model = "spherical"
     variogram_parameters = {"sill": 0.8, "range": 5, "nugget": 0}

@@ -23,8 +23,12 @@ class MergeDifferenceIDW(Base):
     def __init__(
         self,
         grid_location_radar="center",
+        min_observations=5,
     ):
         Base.__init__(self, grid_location_radar)
+
+        # Minimum number of observations needed to perform merging
+        self.min_observations = min_observations
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge
@@ -88,7 +92,7 @@ class MergeDifferenceIDW(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Calculate radar-ground difference
         if method == "additive":
@@ -108,6 +112,14 @@ class MergeDifferenceIDW(Base):
             keep = np.where(~np.isnan(diff))[0]
         else:
             keep = keep_function([diff, rad, obs, x0])
+
+        # Return gridded data if too few observations
+        if obs[keep].size <= self.min_observations:
+            return da_rad
+
+        # Ensure same functionality as in kriging
+        if not nnear:
+            nnear = obs[keep].size
 
         # Coordinates to predict
         coord_pred = np.hstack(
@@ -136,26 +148,31 @@ class MergeDifferenceIDW(Base):
         return xr.DataArray(data=[adjusted], coords=da_rad.coords, dims=da_rad.dims)
 
 
-class MergeDifferenceBlockKriging(Base):
-    """Merge CML and radar using block kriging
+class MergeDifferenceOrdinaryKriging(Base):
+    """Merge CML and radar using ordinary kriging
 
     Merges the provided radar field in ds_rad with gauge or CML observations
     by interpolating the difference (additive or multiplicative)
-    between the ground and radar observations using Block Kriging.
+    between the ground and radar observations using ordinary kriging. The class
+    defaults to interpolation using neighbouring observations, but it can
+    also consider all observations by setting n_closest to False. It also
+    by default uses the full line geometry for interpolation, but can treat
+    the lines as points by setting full_line to False.
     """
 
     def __init__(
         self,
         grid_location_radar="center",
         discretization=8,
+        min_observations=5,
     ):
         Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
 
-        # For storing variogram parameters
-        self.variogram_param = None
+        # Minimum number of observations needed to perform merging
+        self.min_observations = min_observations
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
@@ -186,7 +203,7 @@ class MergeDifferenceBlockKriging(Base):
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as
+            Gridded rainfall data. Must contain the lon and lat coordinates as
             well as the projected coordinates xs and ys as a meshgrid.
         da_cml: xarray.DataArray
             CML observations. Must contain the projected midpoint
@@ -223,7 +240,7 @@ class MergeDifferenceBlockKriging(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Calculate radar-ground difference
         if method == "additive":
@@ -243,6 +260,10 @@ class MergeDifferenceBlockKriging(Base):
             keep = np.where(~np.isnan(diff))[0]
         else:
             keep = keep_function([diff, rad, obs, x0])
+
+        # Return gridded data if too few observations
+        if obs[keep].size <= self.min_observations:
+            return da_rad
 
         # Force interpolator to use only midpoint, if specified by user
         x0 = x0[:, :, [int(x0.shape[2] / 2)]] if full_line is False else x0
@@ -284,8 +305,8 @@ class MergeDifferenceBlockKriging(Base):
         return xr.DataArray(data=[adjusted], coords=da_rad.coords, dims=da_rad.dims)
 
 
-class MergeBlockKrigingExternalDrift(Base):
-    """Merge CML and radar using block-kriging with external drift.
+class MergeKrigingExternalDrift(Base):
+    """Merge CML and radar using kriging with external drift.
 
     Merges the provided radar field in ds_rad to CML and rain gauge
     observations by using a block kriging variant of kriging with external
@@ -296,17 +317,20 @@ class MergeBlockKrigingExternalDrift(Base):
         self,
         grid_location_radar="center",
         discretization=8,
+        min_observations=5,
     ):
         Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
 
+        # Minimum number of observations needed to perform merging
+        self.min_observations = min_observations
+
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
-        This function uses the full CML geometry and makes the gauge geometry
-        appear as a rain gauge.
+        This function initializes x0 on block form.
         """
         self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
         self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
@@ -365,13 +389,17 @@ class MergeBlockKrigingExternalDrift(Base):
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_rad_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Default decision on which observations to keep
         if not keep_function:
             keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
         else:
             keep = keep_function([rad, obs, x0])
+
+        # Return gridded data if too few observations
+        if obs[keep].size <= self.min_observations:
+            return da_rad
 
         # Setup pykrige with variogram parameters provided by user
         ok = pykrige.OrdinaryKriging(

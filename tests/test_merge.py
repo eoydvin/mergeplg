@@ -66,7 +66,7 @@ def test_MergeDifferenceIDW():
     da_rad_t = ds_rad.isel(time=[0]).R
 
     # Initialize highlevel-class
-    merge_IDW = merge.MergeDifferenceIDW()
+    merge_IDW = merge.MergeDifferenceIDW(min_observations=2)
 
     # Adjust field
     adjusted = merge_IDW.adjust(
@@ -140,7 +140,7 @@ def test_MergeDifferenceIDW():
         assert gauge_r == merge_r
 
 
-def test_MergeDifferenceBlockKriging():
+def test_MergeDifferenceOrdinaryKriging():
     # CML and rain gauge overlapping sets
     da_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=[0]).R
     da_cml_t2 = ds_cmls.isel(cml_id=[1, 0], time=[0]).R
@@ -151,7 +151,10 @@ def test_MergeDifferenceBlockKriging():
     da_rad_t = ds_rad.isel(time=[0]).R
 
     # Initialize highlevel-class
-    merge_BK = merge.MergeDifferenceBlockKriging(discretization=8)
+    merge_BK = merge.MergeDifferenceOrdinaryKriging(
+        discretization=8,
+        min_observations=2,
+    )
 
     # Update geometry to set1
     merge_BK.update(
@@ -332,8 +335,9 @@ def test_MergeBlockKrigingExternalDrift():
     da_rad_t = ds_rad.isel(time=[0]).R
 
     # Initialize highlevel-class
-    merge_KED = merge.MergeBlockKrigingExternalDrift(
+    merge_KED = merge.MergeKrigingExternalDrift(
         discretization=8,
+        min_observations=1,
     )
 
     # Update geometry to set1

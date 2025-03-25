@@ -17,8 +17,12 @@ class InterpolateIDW(Base):
     def __init__(
         self,
         grid_location_radar="center",
+        min_observations=5,
     ):
         Base.__init__(self, grid_location_radar)
+
+        # Minimum number of observations needed to perform interpolation
+        self.min_observations = min_observations
 
     def update(self, da_cml=None, da_gauge=None):
         """Update x0 geometry for CML and gauge
@@ -78,10 +82,22 @@ class InterpolateIDW(Base):
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
 
+        # Return gridded data with zeros if too few observations
+        if obs[keep].size <= self.min_observations:
+            return xr.DataArray(
+                data=[np.zeros(da_grid.xs.shape)],
+                coords=da_grid.coords,
+                dims=da_grid.dims,
+            )
+
         # Coordinates to predict
         coord_pred = np.hstack(
             [da_grid.ys.data.reshape(-1, 1), da_grid.xs.data.reshape(-1, 1)]
         )
+
+        # Ensure same functionality as in kriging
+        if not nnear:
+            nnear = obs[keep].size
 
         # IDW interpolator invdisttree
         idw_interpolator = idw.Invdisttree(x0[keep])
@@ -99,14 +115,14 @@ class InterpolateIDW(Base):
         )
 
 
-class InterpolateBlockKriging(Base):
-    """Interpolate CML and radar using neighbourhood block kriging
+class InterpolateOrdinaryKriging(Base):
+    """Interpolate CML and radar using neighbourhood ordinary kriging
 
     Interpolates the provided CML and rain gauge observations using
-    block kriging. The class defaults to interpolation using neighbouring
-    observations, but in can also consider all observations by setting
+    ordinary kriging. The class defaults to interpolation using neighbouring
+    observations, but it can also consider all observations by setting
     n_closest to False. It also by default uses the full line geometry for
-    interpolation, but can treat the lins as boints by setting full_line
+    interpolation, but can treat the lines as points by setting full_line
     to False.
     """
 
@@ -114,11 +130,15 @@ class InterpolateBlockKriging(Base):
         self,
         grid_location_radar="center",
         discretization=8,
+        min_observations=5,
     ):
         Base.__init__(self, grid_location_radar)
 
         # Number of discretization points along CML
         self.discretization = discretization
+
+        # Minimum number of observations needed to perform interpolation
+        self.min_observations = min_observations
 
     def update(self, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
@@ -185,6 +205,14 @@ class InterpolateBlockKriging(Base):
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
 
+        # Return gridded data with zeros if too few observations
+        if obs[keep].size <= self.min_observations:
+            return xr.DataArray(
+                data=[np.zeros(da_grid.xs.shape)],
+                coords=da_grid.coords,
+                dims=da_grid.dims,
+            )
+
         # Force interpolator to use only midpoint
         if full_line is False:
             x0 = x0[:, :, [int(x0.shape[2] / 2)]]
@@ -203,6 +231,7 @@ class InterpolateBlockKriging(Base):
                 x0[keep],
                 variogram,
             )
+
         # Else do neighbourhood kriging
         else:
             interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
