@@ -49,8 +49,8 @@ ds_rad = xr.Dataset(
         "time": ("time", [0, 1, 2, 3]),
         "lon": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
         "lat": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
-        "xs": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
-        "ys": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
+        "x_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
+        "y_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
     },
 )
 
@@ -201,13 +201,13 @@ def test_MergeDifferenceOrdinaryKriging():
 
     # calculate the adjusted field along CMLs
     intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t1.site_0_lon.data,
-        y1_line=da_cml_t1.site_0_lat.data,
-        x2_line=da_cml_t1.site_1_lon.data,
-        y2_line=da_cml_t1.site_1_lat.data,
+        x1_line=da_cml_t1.site_0_x.data,
+        y1_line=da_cml_t1.site_0_y.data,
+        x2_line=da_cml_t1.site_1_x.data,
+        y2_line=da_cml_t1.site_1_y.data,
         cml_id=da_cml_t1.cml_id.data,
-        x_grid=adjusted.lon.data,
-        y_grid=adjusted.lat.data,
+        x_grid=adjusted.x_grid.data,
+        y_grid=adjusted.y_grid.data,
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
@@ -287,13 +287,13 @@ def test_MergeDifferenceOrdinaryKriging():
 
     # calculate the adjusted field along CMLs
     intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t2.site_0_lon.data,
-        y1_line=da_cml_t2.site_0_lat.data,
-        x2_line=da_cml_t2.site_1_lon.data,
-        y2_line=da_cml_t2.site_1_lat.data,
+        x1_line=da_cml_t2.site_0_x.data,
+        y1_line=da_cml_t2.site_0_y.data,
+        x2_line=da_cml_t2.site_1_x.data,
+        y2_line=da_cml_t2.site_1_y.data,
         cml_id=da_cml_t2.cml_id.data,
-        x_grid=adjusted.lon.data,
-        y_grid=adjusted.lat.data,
+        x_grid=adjusted.x_grid.data,
+        y_grid=adjusted.y_grid.data,
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
@@ -385,13 +385,13 @@ def test_MergeBlockKrigingExternalDrift():
 
     # calculate the adjusted field along CMLs
     intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t1.site_0_lon.data,
-        y1_line=da_cml_t1.site_0_lat.data,
-        x2_line=da_cml_t1.site_1_lon.data,
-        y2_line=da_cml_t1.site_1_lat.data,
+        x1_line=da_cml_t1.site_0_x.data,
+        y1_line=da_cml_t1.site_0_y.data,
+        x2_line=da_cml_t1.site_1_x.data,
+        y2_line=da_cml_t1.site_1_y.data,
         cml_id=da_cml_t1.cml_id.data,
-        x_grid=adjusted.lon.data,
-        y_grid=adjusted.lat.data,
+        x_grid=adjusted.x_grid.data,
+        y_grid=adjusted.y_grid.data,
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
@@ -466,13 +466,13 @@ def test_MergeBlockKrigingExternalDrift():
 
     # calculate the adjusted field along CMLs
     intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t2.site_0_lon.data,
-        y1_line=da_cml_t2.site_0_lat.data,
-        x2_line=da_cml_t2.site_1_lon.data,
-        y2_line=da_cml_t2.site_1_lat.data,
+        x1_line=da_cml_t2.site_0_x.data,
+        y1_line=da_cml_t2.site_0_y.data,
+        x2_line=da_cml_t2.site_1_x.data,
+        y2_line=da_cml_t2.site_1_y.data,
         cml_id=da_cml_t2.cml_id.data,
-        x_grid=adjusted.lon.data,
-        y_grid=adjusted.lat.data,
+        x_grid=adjusted.x_grid.data,
+        y_grid=adjusted.y_grid.data,
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
@@ -530,13 +530,13 @@ def test_MergeBlockKrigingExternalDrift():
 
     # calculate the adjusted field along CMLs
     intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t2.site_0_lon.data,
-        y1_line=da_cml_t2.site_0_lat.data,
-        x2_line=da_cml_t2.site_1_lon.data,
-        y2_line=da_cml_t2.site_1_lat.data,
+        x1_line=da_cml_t2.site_0_x.data,
+        y1_line=da_cml_t2.site_0_y.data,
+        x2_line=da_cml_t2.site_1_x.data,
+        y2_line=da_cml_t2.site_1_y.data,
         cml_id=da_cml_t2.cml_id.data,
-        x_grid=adjusted.lon.data,
-        y_grid=adjusted.lat.data,
+        x_grid=adjusted.x_grid.data,
+        y_grid=adjusted.y_grid.data,
         grid_point_location="center",
     )
     adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(

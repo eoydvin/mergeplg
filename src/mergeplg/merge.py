@@ -59,15 +59,13 @@ class MergeDifferenceIDW(Base):
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as
-            well as the projected coordinates xs and ys as a meshgrid.
+            Gridded radar data. Must contain the coordinates x_grid and y_grid.
         da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
+            CML observations. Must contain the projected coordinates for the CML
+            (site_0_x, site_0_y, site_1_x, site_1_y) as well as the
             projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon) as well as the projected coordinates (x, y).
+            Gauge observations. Must contain the projected coordinates (x, y).
         p: float
             IDW interpolation parameter
         idw_method: str
@@ -123,7 +121,7 @@ class MergeDifferenceIDW(Base):
 
         # Coordinates to predict
         coord_pred = np.hstack(
-            [da_rad.ys.data.reshape(-1, 1), da_rad.xs.data.reshape(-1, 1)]
+            [da_rad.y_grid.data.reshape(-1, 1), da_rad.x_grid.data.reshape(-1, 1)]
         )
 
         # IDW interpolator invdisttree
@@ -135,7 +133,7 @@ class MergeDifferenceIDW(Base):
             p=p,
             idw_method=idw_method,
             max_distance=max_distance,
-        ).reshape(da_rad.xs.shape)
+        ).reshape(da_rad.x_grid.shape)
 
         # Adjust radar field
         if method == "additive":
@@ -203,8 +201,8 @@ class MergeDifferenceOrdinaryKriging(Base):
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded rainfall data. Must contain the lon and lat coordinates as
-            well as the projected coordinates xs and ys as a meshgrid.
+            Gridded rainfall data. Must contain the  projected coordinates x_grid and
+            y_grid as a meshgrid.
         da_cml: xarray.DataArray
             CML observations. Must contain the projected midpoint
             coordinates (x, y).
@@ -276,8 +274,8 @@ class MergeDifferenceOrdinaryKriging(Base):
         # If nnear is set to False, use all observations in kriging
         if not nnear:
             interpolated = bk_functions.interpolate_block_kriging(
-                da_rad.xs.data,
-                da_rad.ys.data,
+                da_rad.x_grid.data,
+                da_rad.y_grid.data,
                 diff[keep],
                 x0[keep],
                 variogram,
@@ -286,8 +284,8 @@ class MergeDifferenceOrdinaryKriging(Base):
         # Else do neighbourhood kriging
         else:
             interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
-                da_rad.xs.data,
-                da_rad.ys.data,
+                da_rad.x_grid.data,
+                da_rad.y_grid.data,
                 diff[keep],
                 x0[keep],
                 variogram,
@@ -357,15 +355,13 @@ class MergeKrigingExternalDrift(Base):
         Parameters
         ----------
         da_rad: xarray.DataArray
-            Gridded radar data. Must contain the lon and lat coordinates as
-            well as the projected coordinates xs and ys as a meshgrid.
+            Gridded radar data. Must contain the projected coordinates
+            xs and ys as a meshgrid.
         da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
-            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
+            CML observations. Must contain the projected coordinates
+            (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon) as well as the projected coordinates (x, y).
+            Gauge observations. Must contain the projected coordinates (x, y).
         variogram_model: str
             Must be a valid variogram type in pykrige.
         variogram_parameters: str
@@ -423,8 +419,8 @@ class MergeKrigingExternalDrift(Base):
         # do addtitive IDW merging
         adjusted = bk_functions.merge_ked_blockkriging(
             rad_field,
-            da_rad.xs.data,
-            da_rad.ys.data,
+            da_rad.x_grid.data,
+            da_rad.y_grid.data,
             rad[keep],
             obs[keep],
             x0[keep],

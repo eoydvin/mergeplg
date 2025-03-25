@@ -85,14 +85,14 @@ class InterpolateIDW(Base):
         # Return gridded data with zeros if too few observations
         if obs[keep].size <= self.min_observations:
             return xr.DataArray(
-                data=[np.zeros(da_grid.xs.shape)],
+                data=[np.zeros(da_grid.x_grid.shape)],
                 coords=da_grid.coords,
                 dims=da_grid.dims,
             )
 
         # Coordinates to predict
         coord_pred = np.hstack(
-            [da_grid.ys.data.reshape(-1, 1), da_grid.xs.data.reshape(-1, 1)]
+            [da_grid.y_grid.data.reshape(-1, 1), da_grid.x_grid.data.reshape(-1, 1)]
         )
 
         # Ensure same functionality as in kriging
@@ -108,7 +108,7 @@ class InterpolateIDW(Base):
             p=p,
             idw_method=idw_method,
             max_distance=max_distance,
-        ).reshape(da_grid.xs.shape)
+        ).reshape(da_grid.x_grid.shape)
 
         return xr.DataArray(
             data=[interpolated], coords=da_grid.coords, dims=da_grid.dims
@@ -208,7 +208,7 @@ class InterpolateOrdinaryKriging(Base):
         # Return gridded data with zeros if too few observations
         if obs[keep].size <= self.min_observations:
             return xr.DataArray(
-                data=[np.zeros(da_grid.xs.shape)],
+                data=[np.zeros(da_grid.x_grid.shape)],
                 coords=da_grid.coords,
                 dims=da_grid.dims,
             )
@@ -225,8 +225,8 @@ class InterpolateOrdinaryKriging(Base):
         # If nnear is set to False, use all observations in kriging
         if not nnear:
             interpolated = bk_functions.interpolate_block_kriging(
-                da_grid.xs.data,
-                da_grid.ys.data,
+                da_grid.x_grid.data,
+                da_grid.y_grid.data,
                 obs[keep],
                 x0[keep],
                 variogram,
@@ -235,8 +235,8 @@ class InterpolateOrdinaryKriging(Base):
         # Else do neighbourhood kriging
         else:
             interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
-                da_grid.xs.data,
-                da_grid.ys.data,
+                da_grid.x_grid.data,
+                da_grid.y_grid.data,
                 obs[keep],
                 x0[keep],
                 variogram,

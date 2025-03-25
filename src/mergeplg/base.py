@@ -140,12 +140,10 @@ class Base:
         discretization: int
             Number of discretized intervals for the CMLs.
         da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat) as well as the
-            projected coordinates (site_0_x, site_0_y, site_1_x, site_1_y).
+            CML observations. Must contain the projected coordinates
+            (site_0_x, site_0_y, site_1_x, site_1_y) of the CML.
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon) as well as the projected coordinates (x, y).
+            Gauge observations. Must contain the projected coordinates (x, y).
         """
         # Check that there is radar or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
@@ -232,14 +230,14 @@ class Base:
         Parameters
         ----------
         da_grid: xarray.DataArray
-            Gridded rainfall data. Must contain the lon and lat coordinates as a
-            meshgrid.
+            Gridded rainfall data. Must contain the projected coordinates
+            (x_grid, y_grid).
         da_cml: xarray.DataArray
-            CML observations. Must contain the lat/lon coordinates for the CML
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat).
+            CML observations. Must contain the projected coordinates for the CML
+            (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon).
+            Gauge observations. Must contain the projected coordinates for the
+            rain gauge positions (y, x).
         """
         # Check that there is CML or gauge data, if not raise an error
         if (da_cml is None) and (da_gauge is None):
@@ -253,13 +251,13 @@ class Base:
                 # Calculate CML radar grid intersection weights
                 self.intersect_weights = (
                     plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-                        x1_line=da_cml.site_0_lon.data,
-                        y1_line=da_cml.site_0_lat.data,
-                        x2_line=da_cml.site_1_lon.data,
-                        y2_line=da_cml.site_1_lat.data,
+                        x1_line=da_cml.site_0_x.data,
+                        y1_line=da_cml.site_0_y.data,
+                        x2_line=da_cml.site_1_x.data,
+                        y2_line=da_cml.site_1_y.data,
                         cml_id=da_cml.cml_id.data,
-                        x_grid=da_grid.lon.data,
-                        y_grid=da_grid.lat.data,
+                        x_grid=da_grid.x_grid.data,
+                        y_grid=da_grid.y_grid.data,
                         grid_point_location=self.grid_point_location,
                     )
                 )
@@ -289,13 +287,13 @@ class Base:
                     # Intersect weights of CMLs to add
                     intersect_weights_add = (
                         plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-                            x1_line=da_cml_add.site_0_lon.data,
-                            y1_line=da_cml_add.site_0_lat.data,
-                            x2_line=da_cml_add.site_1_lon.data,
-                            y2_line=da_cml_add.site_1_lat.data,
+                            x1_line=da_cml_add.site_0_x.data,
+                            y1_line=da_cml_add.site_0_y.data,
+                            x2_line=da_cml_add.site_1_x.data,
+                            y2_line=da_cml_add.site_1_y.data,
                             cml_id=da_cml_add.cml_id.data,
-                            x_grid=da_grid.lon.data,
-                            y_grid=da_grid.lat.data,
+                            x_grid=da_grid.x_grid.data,
+                            y_grid=da_grid.y_grid.data,
                             grid_point_location=self.grid_point_location,
                         )
                     )
@@ -351,11 +349,11 @@ class Base:
         Parameters
         ----------
         da_cml: xarray.DataArray
-            CML observations. Must contain the coordinates for the CML positions
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
+            CML observations. Must contain the projected coordinates for the
+            CML positions (site_0_x, site_0_y, site_1_x, site_1_y)
         da_gauge: xarray.DataArray
-            gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon)
+            gauge observations. Must contain the projected coordinates for the
+            rain gauge positions (x, y)
         """
         # If CML and gauge data is provided
         if (da_cml is not None) and (da_gauge is not None):
@@ -406,14 +404,14 @@ class Base:
         Parameters
         ----------
         da_grid: xarray.DataArray
-            Gridded rainfall data. Must contain the lon and lat coordinates as a
-            meshgrid.
+            Gridded rainfall data. Must contain the projected x_grid and Y_grid
+            coordinates.
         da_cml: xarray.DataArray
-            CML observations. Must contain the coordinates for the CML positions
-            (site_0_lon, site_0_lat, site_1_lon, site_1_lat)
+            CML observations. Must contain the projected coordinates for the CML
+            positions (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
-            Gauge observations. Must contain the coordinates for the rain gauge
-            positions (lat, lon)
+            Gauge observations. Must contain the projected coordinates for the rain
+            gauge positions (x, y)
         """
         # If CML and gauge data is provided
         if (da_cml is not None) and (da_gauge is not None):
@@ -496,10 +494,7 @@ def calculate_cml_line(ds_cmls, discretization=8):
     Calculates the discretized CML line coordinates by dividing the CMLs into
     discretization-number of intervals. The ds_cmls xarray object must contain the
     projected coordinates (site_0_x, site_0_y, site_1_x site_1_y) defining
-    the start and end point of the CML. If no such projection is available
-    the user can, as an approximation, rename the lat/lon coordinates so that
-    they are accepted into this function. Beware that for lat/lon coordinates
-    the line geometry is not perfectly represented.
+    the start and end point of the CML.
 
     Parameters
     ----------

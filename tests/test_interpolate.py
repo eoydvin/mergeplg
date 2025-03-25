@@ -49,8 +49,8 @@ ds_rad = xr.Dataset(
         "time": ("time", [0, 1, 2, 3]),
         "lon": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
         "lat": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
-        "xs": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
-        "ys": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
+        "x_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[0]),
+        "y_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
     },
 )
 
@@ -95,10 +95,10 @@ def test_blockkriging_vs_pykrige():
 
     z, ss = ok.execute(
         "points",
-        da_grid.ys.data.ravel().astype(float),
-        da_grid.xs.data.ravel().astype(float),
+        da_grid.y_grid.data.ravel().astype(float),
+        da_grid.x_grid.data.ravel().astype(float),
     )
 
-    interp_field_pykrige = [z.reshape(da_grid.xs.shape)]
+    interp_field_pykrige = [z.reshape(da_grid.x_grid.shape)]
 
     np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
