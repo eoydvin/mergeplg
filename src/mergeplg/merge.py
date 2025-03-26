@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pykrige
 import xarray as xr
 
 from mergeplg import bk_functions
@@ -397,18 +396,10 @@ class MergeKrigingExternalDrift(Base):
         if obs[keep].size <= self.min_observations:
             return da_rad
 
-        # Setup pykrige with variogram parameters provided by user
-        ok = pykrige.OrdinaryKriging(
-            x0[keep, 1, int(x0.shape[2] / 2)],  # x-midpoint coordinate
-            x0[keep, 0, int(x0.shape[2] / 2)],  # y-midpoint coordinate
-            obs[keep],
-            variogram_model=variogram_model,
-            variogram_parameters=variogram_parameters,
+        # Construct variogram using parameters provided by user
+        variogram = bk_functions.construct_variogram(
+            obs[keep], x0[keep], variogram_parameters, variogram_model
         )
-
-        # Construct variogram using pykrige
-        def variogram(h):
-            return ok.variogram_function(ok.variogram_model_parameters, h)
 
         # Remove radar time dimension
         rad_field = da_rad.isel(time=0).data

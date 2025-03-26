@@ -51,7 +51,13 @@ def interpolate_neighbourhood_block_kriging(
     lengths_point_l = block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
-    cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
+    cov_block = -variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_point_l,
+    ).mean(axis=(2, 3))
+
+    # Indirectly set nugget value
+    np.fill_diagonal(cov_block, 0)
 
     # Create Kriging matrix
     mat = np.zeros([cov_block.shape[0] + 1, cov_block.shape[1] + 1])
@@ -80,7 +86,10 @@ def interpolate_neighbourhood_block_kriging(
         a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
 
         # Estimate expected variance for all links
-        target = variogram(lengths[indices]).mean(axis=1)
+        target = -variogram.variogram_function(
+            variogram.variogram_model_parameters,
+            lengths[indices],
+        ).mean(axis=1)
 
         # Add non bias condition
         target = np.append(target, 1)
@@ -135,7 +144,13 @@ def interpolate_block_kriging(
     lengths_point_l = block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
-    cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
+    cov_block = -variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_point_l,
+    ).mean(axis=(2, 3))
+
+    # Indirectly set nugget value
+    np.fill_diagonal(cov_block, 0)
 
     # Create Kriging matrix
     mat = np.zeros([cov_block.shape[0] + 1, cov_block.shape[1] + 1])
@@ -159,7 +174,10 @@ def interpolate_block_kriging(
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Estimate expected variance for all links
-        target = variogram(lengths).mean(axis=1)
+        target = -variogram.variogram_function(
+            variogram.variogram_model_parameters,
+            lengths,
+        ).mean(axis=1)
 
         # Add non bias condition
         target = np.append(target, 1)
@@ -212,8 +230,15 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
     lengths_point_l = block_points_to_lengths(x0)
 
     # Estimate mean variogram over link geometries
-    cov_block = variogram(lengths_point_l).mean(axis=(2, 3))
+    cov_block = -variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_point_l,
+    ).mean(axis=(2, 3))
 
+    # Indirectly set nugget value
+    np.fill_diagonal(cov_block, 0)
+
+    # Create Kriging matrix
     mat = np.zeros([cov_block.shape[0] + 2, cov_block.shape[1] + 2])
     mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
     mat[-2, :-2] = np.ones(cov_block.shape[1])  # non-bias condition
@@ -245,7 +270,11 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
         # Calc the inverse, only dependent on geometry
         a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
 
-        target = variogram(lengths[indices]).mean(axis=1)
+        # Estimate expected variance for all links
+        target = -variogram.variogram_function(
+            variogram.variogram_model_parameters,
+            lengths[indices],
+        ).mean(axis=1)
 
         target = np.append(target, 1)  # non bias condition
         target = np.append(target, rad_field_t[i])  # radar value
@@ -343,16 +372,10 @@ def construct_variogram(
     if len(x0.shape) > 2:
         x0 = x0[:, :, int(x0.shape[2] / 2)]
 
-    ok = pykrige.OrdinaryKriging(
+    return pykrige.OrdinaryKriging(
         x0[:, 1],  # x-midpoint coordinate
         x0[:, 0],  # y-midpoint coordinate
         obs,
         variogram_parameters=variogram_parameters,
         variogram_model=variogram_model,
     )
-
-    # Construct variogram using pykrige
-    def variogram(h):
-        return ok.variogram_function(ok.variogram_model_parameters, h)
-
-    return variogram

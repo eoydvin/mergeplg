@@ -65,8 +65,8 @@ def test_blockkriging_vs_pykrige():
     # Initialize highlevel-class
     interpolate_krig = interpolate.InterpolateOrdinaryKriging(min_observations=2)
 
-    variogram_model = "spherical"
-    variogram_parameters = {"sill": 0.8, "range": 5, "nugget": 0}
+    variogram_model = "exponential"
+    variogram_parameters = {"sill": 1, "range": 2, "nugget": 0.5}
 
     # Interpolate field
     interp_field = interpolate_krig.interpolate(
