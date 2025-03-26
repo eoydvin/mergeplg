@@ -420,6 +420,6 @@ class MergeKrigingExternalDrift(Base):
         )
 
         # Remove negative values
-        adjusted[adjusted < 0] = 0
+        adjusted[(adjusted < 0) | np.isnan(adjusted)] = 0
 
         return xr.DataArray(data=[adjusted], coords=da_rad.coords, dims=da_rad.dims)
