@@ -47,23 +47,43 @@ def interpolate_neighbourhood_block_kriging(
         the interpolated field.
 
     """
+    # Calculate lengths between all points within all CMLs
+    lengths_within_l = within_block_l(x0)
+
+    # Estimate covariance within blocks
+    cov_within = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_within_l,
+    ).mean(axis=(1, 2))
+
+    # Mean covariance within block pairs
+    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
+
     # Calculate lengths between all points along all CMLs
     lengths_point_l = block_points_to_lengths(x0)
 
-    # Estimate mean variogram over link geometries
-    cov_block = -variogram.variogram_function(
+    # Average variance across blocks
+    cov_block = variogram.variogram_function(
         variogram.variogram_model_parameters,
         lengths_point_l,
     ).mean(axis=(2, 3))
 
-    # Indirectly set nugget value
-    np.fill_diagonal(cov_block, 0)
+    # Subtract within covariance from block covariance
+    cov_mat = -1 * (cov_block - cov_within)
+
+    # Add nugget value to diagonal as subtracting cov_within_sub removes
+    # block nugget
+    nugget = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        np.array([0.0]),
+    )
+    np.fill_diagonal(cov_mat, nugget)
 
     # Create Kriging matrix
-    mat = np.zeros([cov_block.shape[0] + 1, cov_block.shape[1] + 1])
-    mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
-    mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
-    mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
+    mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
+    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+    mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
+    mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
     # Grid to visit
     xgrid_t, ygrid_t = xgrid.ravel(), ygrid.ravel()
@@ -83,19 +103,22 @@ def interpolate_neighbourhood_block_kriging(
         ind_mat = np.append(indices, mat.shape[0] - 1)
 
         # Calc the inverse, only dependent on geometry
-        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
+        # a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
 
         # Estimate expected variance for all links
-        target = -variogram.variogram_function(
+        cov_line_point = variogram.variogram_function(
             variogram.variogram_model_parameters,
             lengths[indices],
         ).mean(axis=1)
 
+        # Subtract withinblock covariance of the blocks
+        target = -1 * (cov_line_point - cov_within[indices, indices])
+
         # Add non bias condition
         target = np.append(target, 1)
 
-        # Compute the kriging weights
-        w = (a_inv @ target)[:-1]
+        # Solve the kriging system
+        w = np.linalg.solve(mat[np.ix_(ind_mat, ind_mat)], target)[:-1]
 
         # Estimate rainfall amounts at location i
         estimate[i] = obs[indices] @ w
@@ -140,6 +163,18 @@ def interpolate_block_kriging(
         Array with the same structure as xgrid/ygrid containing
         the interpolated field.
     """
+    # Calculate lengths between all points within all CMLs
+    lengths_within_l = within_block_l(x0)
+
+    # Estimate covariance within blocks
+    cov_within = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_within_l,
+    ).mean(axis=(1, 2))
+
+    # Mean covariance within block pairs
+    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
+
     # Calculate lengths between all points along all CMLs
     lengths_point_l = block_points_to_lengths(x0)
 
@@ -149,14 +184,22 @@ def interpolate_block_kriging(
         lengths_point_l,
     ).mean(axis=(2, 3))
 
-    # Indirectly set nugget value
-    np.fill_diagonal(cov_block, 0)
+    # Subtract within covariance from block covariance
+    cov_mat = -1 * (cov_block - cov_within)
+
+    # Add nugget value to diagonal as subtracting cov_within_sub removes
+    # block nugget
+    nugget = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        np.array([0.0]),
+    )
+    np.fill_diagonal(cov_mat, nugget)
 
     # Create Kriging matrix
-    mat = np.zeros([cov_block.shape[0] + 1, cov_block.shape[1] + 1])
-    mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
-    mat[-1, :-1] = np.ones(cov_block.shape[1])  # non-bias condition
-    mat[:-1, -1] = np.ones(cov_block.shape[0])  # lagrange multipliers
+    mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
+    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+    mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
+    mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
     # Invert the kriging matrix
     a_inv = np.linalg.pinv(mat)
@@ -174,10 +217,13 @@ def interpolate_block_kriging(
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Estimate expected variance for all links
-        target = -variogram.variogram_function(
+        cov_line_point = -variogram.variogram_function(
             variogram.variogram_model_parameters,
             lengths,
         ).mean(axis=1)
+
+        # Subtract withinblock covariance of the blocks
+        target = -1 * (cov_line_point - np.diag(cov_within))
 
         # Add non bias condition
         target = np.append(target, 1)
@@ -223,6 +269,18 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
         Array with the same structure as xgrid/ygrid containing
         the interpolated field.
     """
+    # Calculate lengths between all points within all CMLs
+    lengths_within_l = within_block_l(x0)
+
+    # Estimate covariance within blocks
+    cov_within = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        lengths_within_l,
+    ).mean(axis=(1, 2))
+
+    # Mean covariance within block pairs
+    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
+
     # Array for storing merged values
     rain = np.full(xgrid.shape, np.nan)
 
@@ -235,15 +293,23 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
         lengths_point_l,
     ).mean(axis=(2, 3))
 
-    # Indirectly set nugget value
-    np.fill_diagonal(cov_block, 0)
+    # Subtract within covariance from block covariance
+    cov_mat = -1 * (cov_block - cov_within)
+
+    # Add nugget value to diagonal as subtracting cov_within_sub removes
+    # block nugget
+    nugget = variogram.variogram_function(
+        variogram.variogram_model_parameters,
+        np.array([0.0]),
+    )
+    np.fill_diagonal(cov_mat, nugget)
 
     # Create Kriging matrix
-    mat = np.zeros([cov_block.shape[0] + 2, cov_block.shape[1] + 2])
-    mat[: cov_block.shape[0], : cov_block.shape[1]] = cov_block
-    mat[-2, :-2] = np.ones(cov_block.shape[1])  # non-bias condition
+    mat = np.zeros([cov_mat.shape[0] + 2, cov_mat.shape[1] + 2])
+    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+    mat[-2, :-2] = np.ones(cov_mat.shape[1])  # non-bias condition
     mat[-1, :-2] = rad  # Radar drift
-    mat[:-2, -2] = np.ones(cov_block.shape[0])  # lagrange multipliers
+    mat[:-2, -2] = np.ones(cov_mat.shape[0])  # lagrange multipliers
     mat[:-2, -1] = rad  # Radar drift
 
     # Skip radar pixels with np.nan
@@ -271,10 +337,13 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
         a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
 
         # Estimate expected variance for all links
-        target = -variogram.variogram_function(
+        cov_line_point = -variogram.variogram_function(
             variogram.variogram_model_parameters,
             lengths[indices],
         ).mean(axis=1)
+
+        # Subtract withinblock covariance of the blocks
+        target = -1 * (cov_line_point - cov_within[indices, indices])
 
         target = np.append(target, 1)  # non bias condition
         target = np.append(target, rad_field_t[i])  # radar value
@@ -288,6 +357,43 @@ def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_c
     rain[~mask] = estimate
 
     return rain.reshape(xgrid.shape)
+
+
+def within_block_l(x0):
+    """Calculate the lengths within all CMLs.
+
+    Given the numpy array x0 created by the function 'calculate_cml_geometry'
+    this function calculates the length between all points within all CMLs.
+
+    Parameters
+    ----------
+    x0: np.array
+        Array with coordinates for all CMLs. The array is organized into a 3D
+        matrix with the following structure:
+            (number of n CMLs [0, ..., n],
+             y/x-cooridnate [0(y), 1(x)],
+             interval [0, ..., disc])
+
+    Returns
+    -------
+    lengths_withinblock_l: np.array
+        Array with lengths between all points along within the CMLs. The array
+        is organized into a 4D matrix with the following structure:
+            (cml_i: [0, ..., number of cmls],
+             cml_i: [0, ..., number of cmls],
+             length_i: [0, ..., number of points along cml].
+             length_i: [0, ..., number of points along cml]).
+
+        Accessing the length between point 0 along cml 0 and point 0 along
+        cml 1 can then be done by lengths_point_l[0, 1, 0, 0]. The mean length
+        can be calculated by lengths_point_l.mean(axis = (2, 3)).
+    """
+    # Estimate delta x within all blocks
+    delta_x = np.array([x0[i][1] - x0[i][1].reshape(-1, 1) for i in range(x0.shape[0])])
+    delta_y = np.array([x0[i][0] - x0[i][0].reshape(-1, 1) for i in range(x0.shape[0])])
+
+    # Lengths within all blocks
+    return np.sqrt(delta_x**2 + delta_y**2)
 
 
 def block_points_to_lengths(x0):
