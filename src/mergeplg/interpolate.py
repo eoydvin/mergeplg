@@ -128,7 +128,6 @@ class InterpolateIDW(Base):
         )
         if time_dim_was_expanded:
             da_interpolated = da_interpolated.isel(time=0)
-            da_interpolated = da_interpolated.drop_vars("time")
         return da_interpolated
 
 
@@ -277,5 +276,4 @@ class InterpolateOrdinaryKriging(Base):
         )
         if time_dim_was_expanded:
             da_interpolated = da_interpolated.isel(time=0)
-            da_interpolated = da_interpolated.drop_vars("time")
         return da_interpolated
