@@ -25,12 +25,63 @@ class InterpolateIDW(Base):
         self.min_observations = min_observations
 
     def update(self, da_cml=None, da_gauge=None):
-        """Update x0 geometry for CML and gauge
+        """Initilize interpolator if observations have changed.
 
-        This function uses the midpoint of the CML as CML reference.
+        Checks cml and gauge names from previous run. Return observations
+        in correct order. 
         """
-        # Update x0 and radar weights
-        self.update_x0_(da_cml=da_cml, da_gauge=da_gauge)
+        
+        if (da_cml is not None) and (da_gauge is not None):
+            cml_id_new = da_cml.cml_id.data
+            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = np.concatenate(da_cml.y.data, da_gauge.y.data)
+                x = np.concatenate(da_cml.x.data, da_gauge.x.data)
+                self.cml_ids = cml_id_new
+                self.gauge_ids = gauge_id_new
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+            
+            # Get and return observations
+            return np.concatenate([
+                da_cml.data.flatten(),
+                da_gauge.data.flatten(),
+            ])
+
+        elif da_cml is not None:
+            cml_id_new = da_cml.cml_id.data
+            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = ~np.array_equal(None, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = da_cml.y.data
+                x = da_cml.x.data
+                self.cml_ids = cml_id_new
+                self.gauge_ids = None
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+
+            # Get and return observations
+            return da_cml.data.flatten()
+        
+        elif da_gauge is not None:
+            cml_change = ~np.array_equal(None, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = da_gauge.y.data
+                x = da_gauge.x.data
+                self.cml_ids = None
+                self.gauge_ids = gauge_id_new
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+
+            # Get and return observations
+            return da_gauge.data.flatten()
 
     def interpolate(
         self,
@@ -86,11 +137,8 @@ class InterpolateIDW(Base):
             da_grid = da_grid.copy().expand_dims("time")
             time_dim_was_expanded = True
 
-        # Update x0 geometry for CML and gauge
-        self.update(da_cml=da_cml, da_gauge=da_gauge)
-
-        # Get ground observations and x0 geometry
-        obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
+        # Update interpolator
+        obs = self.update(da_cml=da_cml, da_gauge=da_gauge)
 
         # Get index of not-nan obs
         keep = np.where(~np.isnan(obs))[0]
@@ -108,13 +156,8 @@ class InterpolateIDW(Base):
             [da_grid.y_grid.data.reshape(-1, 1), da_grid.x_grid.data.reshape(-1, 1)]
         )
 
-        # Ensure same functionality as in kriging
-        if not nnear:
-            nnear = obs[keep].size
-
         # IDW interpolator invdisttree
-        idw_interpolator = idw.Invdisttree(x0[keep])
-        interpolated = idw_interpolator(
+        interpolated = self.interpolator(
             q=coord_pred,
             z=obs[keep],
             nnear=obs[keep].size if obs[keep].size <= nnear else nnear,
@@ -137,48 +180,128 @@ class InterpolateOrdinaryKriging(Base):
 
     Interpolates the provided CML and rain gauge observations using
     ordinary kriging. The class defaults to interpolation using neighbouring
-    observations, but it can also consider all observations by setting
-    n_closest to False. It also by default uses the full line geometry for
+    observations. It also by default uses the full line geometry for
     interpolation, but can treat the lines as points by setting full_line
     to False.
     """
 
     def __init__(
         self,
+        variogram_model="spherical",
+        variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=5,
+        min_observations=1,
+        nnear=8,
+        max_distance=60000,
+        full_line=True,
     ):
+        """
+        Parameters
+        ----------
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
+        nnear: int
+            Number of closest links to use for interpolation
+        max_distance: float
+            Largest distance allowed for including an observation.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        """
         Base.__init__(self, grid_location_radar)
 
-        # Number of discretization points along CML
         self.discretization = discretization
-
-        # Minimum number of observations needed to perform interpolation
         self.min_observations = min_observations
+        self.nnear = nnear
+        self.max_distance = max_distance
+        self.full_line=True
+
+        # Construct variogram using parameters provided by user
+        if variogram_parameters is None:
+            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
+        obs = np.array([0, 1]) # dummy variables
+        coord = np.array([[0, 1], [1, 0]])
+
+        self.variogram = bk_functions.construct_variogram(
+            obs, coord, variogram_parameters, variogram_model
+        )
 
     def update(self, da_cml=None, da_gauge=None):
-        """Update weights and x0 geometry for CML and gauge assuming block data
+        """Initilize interpolator if observations have changed.
 
-        This function uses the full CML geometry and makes the gauge geometry
-        appear as a rain gauge.
+        Checks cml and gauge names from previous run. Initialize
+        if needed.
         """
-        self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
+
+        if (da_cml is not None) and (da_gauge is not None):
+            cml_id_new = da_cml.cml_id.data
+            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.interpolator = bk_functions.OBKrigTree(
+                    self.variogram,
+                    ds_cmls=da_cml, 
+                    ds_gauges=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                    full_line=self.full_line,
+                )
+            
+            # Get and return observations
+            return np.concatenate([
+                da_cml.data.flatten(),
+                da_gauge.data.flatten(),
+            ])
+
+        elif da_cml is not None:
+            cml_id_new = da_cml.cml_id.data
+            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = ~np.array_equal(None, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.interpolator = bk_functions.OBKrigTree(
+                    self.variogram,
+                    ds_cmls=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                )
+            
+            # Get and return observations
+            return da_cml.data.flatten()
+        
+        elif da_gauge is not None:
+            cml_change = ~np.array_equal(None, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.interpolator = bk_functions.OBKrigTree(
+                    self.variogram,
+                    ds_gauges=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                )
+            
+            # Get and return observations
+            return da_gauge.data.flatten()
 
     def interpolate(
         self,
         da_grid,
         da_cml=None,
         da_gauge=None,
-        variogram_model="spherical",
-        variogram_parameters=None,
-        nnear=8,
-        full_line=True,
     ):
         """Interpolate observations for one time step.
 
-        Interpolates ground observations for one time step. The function assumes
-        that the x0 are updated using the update class method.
+        Interpolates ground observations for one time step. 
 
         Input data can have a time dimension of length 1 or no time dimension.
 
@@ -193,17 +316,6 @@ class InterpolateOrdinaryKriging(Base):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        variogram_model: str
-            Must be a valid variogram type in pykrige.
-        variogram_parameters: str
-            Must be a valid parameters corresponding to variogram_model.
-        nnear: int
-            Number of closest links to use for interpolation
-        max_distance: float
-            Largest distance allowed for including an observation.
-        full_line: bool
-            Whether to use the full line for block kriging. If set to false, the
-            x0 geometry is reformatted to simply reflect the midpoint of the CML.
 
         Returns
         -------
@@ -221,56 +333,28 @@ class InterpolateOrdinaryKriging(Base):
         if "time" not in da_grid.dims:
             da_grid = da_grid.copy().expand_dims("time")
             time_dim_was_expanded = True
-        # Initialize variogram parameters
-        if variogram_parameters is None:
-            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
 
-        # Update x0 geometry for CML and gauge
-        self.update(da_cml=da_cml, da_gauge=da_gauge)
-
-        # Get ground observations and x0 geometry
-        obs, x0 = self.get_obs_x0_(da_cml=da_cml, da_gauge=da_gauge)
-
-        # Get index of not-nan obs
-        keep = np.where(~np.isnan(obs))[0]
-
-        # Return gridded data with zeros if too few observations
-        if obs[keep].size <= self.min_observations:
+        # Check if the cml or rain gauges are updated
+        obs = self.update(da_cml=da_cml, da_gauge=da_gauge)
+        
+        # If few observations return zero grid
+        if (~np.isnan(obs)).sum() <= self.min_observations:
             return xr.DataArray(
                 data=[np.zeros(da_grid.x_grid.shape)],
                 coords=da_grid.coords,
                 dims=da_grid.dims,
             )
-
-        # Force interpolator to use only midpoint
-        if full_line is False:
-            x0 = x0[:, :, [int(x0.shape[2] / 2)]]
-
-        # Construct variogram using parameters provided by user
-        variogram = bk_functions.construct_variogram(
-            obs[keep], x0[keep], variogram_parameters, variogram_model
-        )
-
-        # If nnear is set to False, use all observations in kriging
-        if not nnear:
-            interpolated = bk_functions.interpolate_block_kriging(
-                da_grid.x_grid.data,
-                da_grid.y_grid.data,
-                obs[keep],
-                x0[keep],
-                variogram,
-            )
-
+        points = np.hstack([
+            da_grid.y_grid.data.reshape(-1, 1),
+            da_grid.x_grid.data.reshape(-1, 1),
+        ])
+        
         # Else do neighbourhood kriging
-        else:
-            interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
-                da_grid.x_grid.data,
-                da_grid.y_grid.data,
-                obs[keep],
-                x0[keep],
-                variogram,
-                obs[keep].size if obs[keep].size <= nnear else nnear,
-            )
+        interpolated = self.interpolator(
+            points,
+            da_cmls=da_cml,
+            da_gauges= da_gauge,
+        ).reshape(da_grid.x_grid.shape)
 
         da_interpolated = xr.DataArray(
             data=[interpolated], coords=da_grid.coords, dims=da_grid.dims
