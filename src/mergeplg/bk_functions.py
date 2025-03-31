@@ -6,358 +6,418 @@ Created on Fri Oct 18 20:21:53 2024
 
 import numpy as np
 import pykrige
+import xarray as xr
+import scipy
+import poligrain as plg
 
+class OBKrigTree:
+    """ Ordinary block kriging interpolation using KDTree. 
 
-def interpolate_neighbourhood_block_kriging(
-    xgrid,
-    ygrid,
-    obs,
-    x0,
-    variogram,
-    nnear,
-):
-    """Interpolate observations using neighbourhood block kriging
-
-    Interpolate CML and rain gauge data using an neighbourhood based
-    implementation of block kriging as outlined in Goovaerts, P. (2008).
-    Kriging and Semivariogram Deconvolution in the Presence of Irregular
-    Geographical Units. Mathematical Geosciences, 40, 101 - 128.
-    https://doi.org/10.1007/s11004-007-9129-1
-
-    Parameters
-    ----------
-    xgrid numpy.array
-        x coordinates as a meshgrid
-    ygrid numpy array
-        y coordinates as a meshgrid
-    obs: numpy.array
-        Observations to interpolate
-    x0: numpy.array
-        CML geometry as created by calculate_cml_geometry.
-    variogram: function
-        A user defined python function defining the variogram. Takes a distance
-        h and returns the expected variance.
-    nnear: int
-        Number of neighbors to use for interpolation
-
-    Returns
-    -------
-    interpolated_field: numpy.array
-        Array with the same structure as xgrid and ygrid containing
-        the interpolated field.
-
+    Interpolate CML and rain gauge data using an modified neighbourhood 
+    based implementation of block kriging. See Journel and Huijbregts
+    (1978) Mining Geostatistics. 
     """
-    # Calculate lengths between all points within all CMLs
-    lengths_within_l = within_block_l(x0)
+    def __init__(
+            self, 
+            variogram,
+            ds_cmls=None, 
+            ds_gauges=None, 
+            discretization=8,
+            nnear=8,
+            max_distance=60000,
+            ):
 
-    # Estimate covariance within blocks
-    cov_within = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_within_l,
-    ).mean(axis=(1, 2))
+        """ Construct kriging matrices and block geometry.
 
-    # Mean covariance within block pairs
-    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
+        Relies on xarray datasets for CML and rain gauge data following
+        the OpenSense naming convention.
 
-    # Calculate lengths between all points along all CMLs
-    lengths_point_l = block_points_to_lengths(x0)
+        Parameters
+        ----------
+        variogram: function
+            A user defined function defining the variogram. Input 
+            distance, returns the expected variance.
+        ds_cmls: xarray.Dataset
+            CML dataset or data array. Must contain the projected coordinates 
+            of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
+        ds_gauges: xarray.Dataset
+            Gauge dataset or data array. Must contain the projected 
+            coordinates of the rain gauges (x, y).
+        discretization: int
+            Number of intervals to discretize the CML into.
+        nnear: int
+            Number of neighbors to include in neighbourhood.
+        max_distance: float
+            Max distance for including observation in neighbourhood.
+        """
+        if ds_cmls and ds_gauges:
+            # Get structured coordinates of CML and rain gauge
+            x0_cml = calculate_cml_line(ds_cmls).data
+            x0_gauge = calculate_gauge_midpoint(ds_gauges)
+            
+            # Create block geometry for rain gauge
+            x0_gauge = x0_gauge.expand_dims(
+                disc=range(discretization + 1)
+            ).transpose("id", "yx", "disc").data
 
-    # Average variance across blocks
-    cov_block = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_point_l,
-    ).mean(axis=(2, 3))
+            # Store cml and gauge block geometry
+            x0 = np.vstack([x0_cml, x0_gauge])
 
-    # Subtract within covariance from block covariance
-    cov_mat = -1 * (cov_block - cov_within)
+        elif ds_cmls:
+            # Get structured coordinates of CML and store
+            x0 = calculate_cml_line(ds_cmls).data
+        
+        elif ds_gauges:
+            # Get structured coordinates of rain gauge
+            x0_gauge = calculate_gauge_midpoint(ds_gauges)
+            
+            # Create block geometry for rain gauge and store
+            x0 = x0_gauge.expand_dims(
+                disc=range(discretization + 1)
+            ).transpose("id", "yx", "disc").data
+        
+        # Calculate lengths within all CMLs
+        lengths_within_l = within_block_l(x0)
 
-    # Add nugget value to diagonal as subtracting cov_within_sub removes
-    # block nugget
-    nugget = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        np.array([0.0]),
-    )
-    np.fill_diagonal(cov_mat, nugget)
+        # Estimate variance within blocks
+        var_within = variogram(lengths_within_l).mean(axis=(1, 2))
 
-    # Create Kriging matrix
-    mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
-    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
-    mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
-    mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
+        # Mean variance within block pairs
+        var_within = 0.5 * (var_within + var_within.reshape(-1, 1))
 
-    # Grid to visit
-    xgrid_t, ygrid_t = xgrid.ravel(), ygrid.ravel()
+        # Calculate lengths between all points along all blocks
+        lengths_block_l = block_points_to_lengths(x0)
 
-    # array for storing CML-radar merge
-    estimate = np.zeros(xgrid_t.shape)
+        # Average variance across blocks
+        var_block = variogram(lengths_block_l).mean(axis=(2, 3))
 
-    # Compute the contributions from nearby CMLs to points in grid
-    for i in range(xgrid_t.size):
-        # Compute lengths between all points along all links
-        delta_x = x0[:, 1] - xgrid_t[i]
-        delta_y = x0[:, 0] - ygrid_t[i]
-        lengths = np.sqrt(delta_x**2 + delta_y**2)
+        # Subtract within from block and turn into covariance
+        cov_mat = var_within - var_block
 
-        # Get the n closest links
-        indices = np.argpartition(np.nanmin(lengths, axis=1), nnear - 1)[:nnear]
-        ind_mat = np.append(indices, mat.shape[0] - 1)
+        # Add nugget value to diagonal 
+        nugget = variogram(np.array([0.0]),)
+        np.fill_diagonal(cov_mat, nugget)
 
-        # Calc the inverse, only dependent on geometry
-        # a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
+        # Create Kriging matrix
+        mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
+        mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+        mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
+        mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
-        # Estimate expected variance for all links
-        cov_line_point = variogram.variogram_function(
-            variogram.variogram_model_parameters,
-            lengths[indices],
-        ).mean(axis=1)
+        # Store data to self
+        self.mat = mat
+        self.x0 = x0
+        self.var_within = np.diag(var_within)
+        self.n_obs = self.var_within.size
+        self.variogram = variogram
+        self.nnear = nnear
+        self.max_distance = max_distance
+    
+    def __call__(self, points, da_cmls=None, da_gauges=None):
+        """ Construct kriging matrices and block geometry.
 
-        # Subtract withinblock covariance of the blocks
-        target = -1 * (cov_line_point - cov_within[indices, indices])
+        Parameters
+        ----------
+        points numpy.array
+            2D array containing the coordaintes as [y x]. 
+        da_cmls: xarray.DataArray
+            CML data array. Must contain observations for one time step
+            and the projected coordinates of the CML 
+            (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
+        da_gauges: xarray.Dataset
+            Gauge data array. Must contain the observations for one time 
+            step and the projected coordinates of the rain gauges (x, y).
 
-        # Add non bias condition
-        target = np.append(target, 1)
+        Returns
+        -------
+        estimate: numpy.array
+            1D array with the same length as the number of coordinates
+            (points.shape[0]) containing the interpolated field.
+        """
+        # Get observations
+        if (da_cmls is not None) and (da_gauges is not None): 
+            obs = np.concatenate([da_cmls, da_gauges])
 
-        # Solve the kriging system
-        w = np.linalg.solve(mat[np.ix_(ind_mat, ind_mat)], target)[:-1]
+        elif (da_cmls is not None):
+            obs = da_cmls.data.flatten()
+        
+        elif (da_gauges is not None):
+            obs = da_gauges.data.flatten()
+        
+        else:
+            msg = "provide da_cmls or da_gauges"
+            raise ValueError(msg)
+        
+        # Test that number of observations match init
+        if obs.size > self.n_obs:
+            msg = "numer of observations changed, reinitialize"
+            raise ValueError(msg)
 
-        # Estimate rainfall amounts at location i
-        estimate[i] = obs[indices] @ w
+        # Coordinates of neighbour
+        x_neighbours = self.x0[:, 0, int(self.x0.shape[2] / 2)]
+        y_neighbours = self.x0[:, 1, int(self.x0.shape[2] / 2)]
+        
+        # Get neighbourhood, links represented by midpoint
+        xgrid, ygrid = points[:, 0], points[:, 1]
+        tree_neighbors = scipy.spatial.KDTree(
+            data=list(zip(x_neighbours, y_neighbours))
+        )
+        distances, ixs = tree_neighbors.query(
+            list(zip(xgrid, ygrid)),
+            k=self.nnear,
+            distance_upper_bound=self.max_distance,
+        )
 
-    # Return dataset with interpolated values
-    return estimate.reshape(xgrid.shape)
-
-
-def interpolate_block_kriging(
-    xgrid,
-    ygrid,
-    obs,
-    x0,
-    variogram,
-):
-    """Interpolate observations using block kriging
-
-    Interpolate CML and rain gauge data using an implementation of
-    block kriging as outlined in Goovaerts, P. (2008). Kriging and
-    Semivariogram Deconvolution in the Presence of Irregular
-    Geographical Units. Mathematical Geosciences, 40, 101 - 128.
-    https://doi.org/10.1007/s11004-007-9129-1
-
-
-    Parameters
-    ----------
-    xgrid numpy.array
-        x coordinates as a meshgrid
-    ygrid numpy array
-        y coordinates as a meshgrid
-    obs: numpy.array
-        Observations to interpolate
-    x0: numpy.array
-        CML geometry as created by calculate_cml_geometry.
-    variogram: function
-        A user defined python function defining the variogram. Takes a distance
-        h and returns the expected variance.
-
-    Returns
-    -------
-    interpolated_field: numpy.array
-        Array with the same structure as xgrid/ygrid containing
-        the interpolated field.
-    """
-    # Calculate lengths between all points within all CMLs
-    lengths_within_l = within_block_l(x0)
-
-    # Estimate covariance within blocks
-    cov_within = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_within_l,
-    ).mean(axis=(1, 2))
-
-    # Mean covariance within block pairs
-    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
-
-    # Calculate lengths between all points along all CMLs
-    lengths_point_l = block_points_to_lengths(x0)
-
-    # Estimate mean variogram over link geometries
-    cov_block = -variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_point_l,
-    ).mean(axis=(2, 3))
-
-    # Subtract within covariance from block covariance
-    cov_mat = -1 * (cov_block - cov_within)
-
-    # Add nugget value to diagonal as subtracting cov_within_sub removes
-    # block nugget
-    nugget = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        np.array([0.0]),
-    )
-    np.fill_diagonal(cov_mat, nugget)
-
-    # Create Kriging matrix
-    mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
-    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
-    mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
-    mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
-
-    # Invert the kriging matrix
-    a_inv = np.linalg.pinv(mat)
-
-    # Grid to visit
-    xgrid_t, ygrid_t = xgrid.ravel(), ygrid.ravel()
-
-    # array for storing CML-radar merge
-    estimate = np.zeros(xgrid_t.shape)
-
-    # Compute the contributions from all CMLs to points in grid
-    for i in range(xgrid_t.size):
-        delta_x = x0[:, 1] - xgrid_t[i]
-        delta_y = x0[:, 0] - ygrid_t[i]
+        # Vectorized difference estimate
+        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
+        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        delta_y = self.x0[:, 0, :] - y_reshaped
+        delta_x = self.x0[:, 1, :] - x_reshaped
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Estimate expected variance for all links
-        cov_line_point = -variogram.variogram_function(
-            variogram.variogram_model_parameters,
-            lengths,
-        ).mean(axis=1)
+        var_line_point = self.variogram(lengths).mean(axis = 2)
+        
+        # Array for storing estimate
+        estimate = np.zeros(xgrid.size)
+   
+        # Compute the contributions from nearby CMLs to points in grid
+        for i in range(xgrid.size):
+            # kdtree sets missing neighbours to len(neighbourhood)
+            ind = ixs[i][ixs[i] < self.n_obs]
+            
+            # Append the non-bias indices to krigin matrix lookup
+            i_mat = np.append(ind, self.n_obs)
+            
+            # Subtract withinblock covariance of the blocks
+            target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
-        # Subtract withinblock covariance of the blocks
-        target = -1 * (cov_line_point - np.diag(cov_within))
+            # Add non bias condition
+            target = np.append(target, 1)
+            
+            # Solve the kriging system
+            w = np.linalg.solve(self.mat[np.ix_(i_mat, i_mat)], target)[:-1]
 
-        # Add non bias condition
-        target = np.append(target, 1)
+            # Estimate rainfall amounts at location i
+            estimate[i] = obs[ind] @ w
 
-        # Compute the kriging weights
-        w = (a_inv @ target)[:-1]
+        # Return dataset with interpolated values
+        return estimate
 
-        # Estimate rainfall amounts at location i
-        estimate[i] = obs @ w
+class BKEDTree:
+    """ Block kriging with external drift merging using KDTree. 
 
-    # Return dataset with interpolated values
-    return estimate.reshape(xgrid.shape)
-
-
-def merge_ked_blockkriging(rad_field, xgrid, ygrid, rad, obs, x0, variogram, n_closest):
-    """Merge ground and radar using Kriging with external drift
-
-    Marges the provided radar field
-
-    Parameters
-    ----------
-    rad_field: numpy.array
-        Gridded radar data corresponding to xgrid and ygrid.
-    xgrid: numpy.array
-        X-grid for radar field, as a meshgrid.
-    ygrid: numpy.array
-        Y-grid for the radar field, as a meshgrid.
-    rad: numpy array
-        Radar observations at the ground (obs) locations.
-    obs: numpy.array
-        Ground observations.
-    x0: numpy.array
-        Ground observations geometry as created by calculate_cml_geometry.
-    variogram: function
-        A user defined function defining the variogram. Takes a distance
-        h and returns the expected variance.
-    n_closest: int
-        Number of closest ground observations (obs) to use for interpolation
-
-    Returns
-    -------
-    interpolated_field: numpy.array
-        Array with the same structure as xgrid/ygrid containing
-        the interpolated field.
+    Merge radar and CML and rain gauge data using an modified 
+    neighbourhood based implementation of block kriging with 
+    external drift. See Journel and Huijbregts (1978) 
+    Mining Geostatistics. 
     """
-    # Calculate lengths between all points within all CMLs
-    lengths_within_l = within_block_l(x0)
+    def __init__(
+            self, 
+            variogram,
+            rad_cmls=None,
+            rad_gauges=None,
+            ds_cmls=None, 
+            ds_gauges=None,
+            discretization=8,
+            nnear=8,
+            max_distance=60000,
+            ):
 
-    # Estimate covariance within blocks
-    cov_within = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_within_l,
-    ).mean(axis=(1, 2))
+        """ Construct kriging matrices and block geometry.
 
-    # Mean covariance within block pairs
-    cov_within = 0.5 * (cov_within + cov_within.reshape(-1, 1))
+        Relies on xarray datasets for CML and rain gauge data following
+        the OpenSense naming convention.
 
-    # Array for storing merged values
-    rain = np.full(xgrid.shape, np.nan)
+        Parameters
+        ----------
+        variogram: function
+            A user defined function defining the variogram. Input 
+            distance, returns the expected variance.
+        rad_cmls: numpy.array or xr.DataArray
+            Radar observations at CML positions.
+        rad_gauges: numpy.array or xr.DataArray
+            Radar observations at rain gauge positions.
+        ds_cmls: xarray.Dataset
+            CML dataset or data array. Must contain the projected coordinates 
+            of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
+        ds_gauges: xarray.Dataset
+            Gauge dataset or data array. Must contain the projected 
+            coordinates of the rain gauges (x, y).
+        discretization: int
+            Number of intervals to discretize the CML into.
+        nnear: int
+            Number of neighbors to include in neighbourhood.
+        max_distance: float
+            Max distance for including observation in neighbourhood.
+        """
+        if ds_cmls and ds_gauges:
+            # Get structured coordinates of CML and rain gauge
+            x0_cml = calculate_cml_line(ds_cmls).data
+            x0_gauge = calculate_gauge_midpoint(ds_gauges)
+            
+            # Create block geometry for rain gauge
+            x0_gauge = x0_gauge.expand_dims(
+                disc=range(discretization + 1)
+            ).transpose("id", "yx", "disc").data
 
-    # Calculate lengths between all points along all CMLs
-    lengths_point_l = block_points_to_lengths(x0)
+            # Store cml and gauge block geometry
+            x0 = np.vstack([x0_cml, x0_gauge])
 
-    # Estimate mean variogram over link geometries
-    cov_block = -variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        lengths_point_l,
-    ).mean(axis=(2, 3))
+            # Radar observations
+            rad_obs = np.concatenate([rad_cmls, rad_gauges])
 
-    # Subtract within covariance from block covariance
-    cov_mat = -1 * (cov_block - cov_within)
+        elif ds_cmls:
+            # Get structured coordinates of CML and store
+            x0 = calculate_cml_line(ds_cmls).data
+            
+            # Radar observations
+            rad_obs = np.array(rad_cmls)
+        
+        elif ds_gauges:
+            # Get structured coordinates of rain gauge
+            x0_gauge = calculate_gauge_midpoint(ds_gauges)
+            
+            # Create block geometry for rain gauge and store
+            x0 = x0_gauge.expand_dims(
+                disc=range(discretization + 1)
+            ).transpose("id", "yx", "disc").data
+        
+            # Radar observations
+            rad_obs = np.array(rad_gauges)
 
-    # Add nugget value to diagonal as subtracting cov_within_sub removes
-    # block nugget
-    nugget = variogram.variogram_function(
-        variogram.variogram_model_parameters,
-        np.array([0.0]),
-    )
-    np.fill_diagonal(cov_mat, nugget)
+        # Calculate lengths within all CMLs
+        lengths_within_l = within_block_l(x0)
 
-    # Create Kriging matrix
-    mat = np.zeros([cov_mat.shape[0] + 2, cov_mat.shape[1] + 2])
-    mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
-    mat[-2, :-2] = np.ones(cov_mat.shape[1])  # non-bias condition
-    mat[-1, :-2] = rad  # Radar drift
-    mat[:-2, -2] = np.ones(cov_mat.shape[0])  # lagrange multipliers
-    mat[:-2, -1] = rad  # Radar drift
+        # Estimate variance within blocks
+        var_within = variogram(lengths_within_l).mean(axis=(1, 2))
 
-    # Skip radar pixels with np.nan
-    mask = np.isnan(rad_field)
+        # Mean variance within block pairs
+        var_within = 0.5 * (var_within + var_within.reshape(-1, 1))
 
-    # Gridpoints to use
-    xgrid_t, ygrid_t = xgrid[~mask], ygrid[~mask]
-    rad_field_t = rad_field[~mask]
+        # Calculate lengths between all points along all blocks
+        lengths_block_l = block_points_to_lengths(x0)
 
-    # array for storing CML-radar merge
-    estimate = np.zeros(xgrid_t.shape)
+        # Average variance across blocks
+        var_block = variogram(lengths_block_l).mean(axis=(2, 3))
 
-    # Compute the contributions from all CMLs to points in grid
-    for i in range(xgrid_t.size):
-        # compute target, that is R.H.S of eq 15 (jewel2013)
-        delta_x = x0[:, 1] - xgrid_t[i]
-        delta_y = x0[:, 0] - ygrid_t[i]
+        # Subtract within from block and turn into covariance
+        cov_mat = var_within - var_block
+
+        # Add nugget value to diagonal 
+        nugget = variogram(np.array([0.0]),)
+        np.fill_diagonal(cov_mat, nugget)
+
+        # Create Kriging matrix
+        mat = np.zeros([cov_mat.shape[0] + 2, cov_mat.shape[1] + 2])
+        mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+        mat[-2, :-2] = np.ones(cov_mat.shape[1])  # non-bias condition
+        mat[-1, :-2] = rad_obs  # Radar drift
+        mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
+        mat[:-2, -1] = rad_obs  # Radar drift
+
+        # Store data to self
+        self.mat = mat
+        self.x0 = x0
+        self.var_within = np.diag(var_within)
+        self.n_obs = self.var_within.size
+        self.variogram = variogram
+        self.nnear = nnear
+        self.max_distance = max_distance
+    
+    def __call__(self, points, rad_field, da_cmls=None, da_gauges=None):
+        """ Construct kriging matrices and block geometry.
+
+        Parameters
+        ----------
+        points: numpy.array
+            2D array containing the coordaintes as [y x]. 
+        rad_field: numpy.array
+            1D array containing the radar observation at the coordinates
+            stored in points.
+        da_cmls: xarray.DataArray
+            CML data array. Must contain observations for one time step
+            and the projected coordinates of the CML 
+            (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
+        da_gauges: xarray.Dataset
+            Gauge data array. Must contain the observations for one time 
+            step and the projected coordinates of the rain gauges (x, y).
+
+        Returns
+        -------
+        estimate: numpy.array
+            1D array with the same length as the number of coordinates
+            (points.shape[0]) containing the interpolated field.
+        """
+        # Get observations
+        if (da_cmls is not None) and (da_gauges is not None): 
+            obs = np.concatenate([da_cmls, da_gauges])
+
+        elif (da_cmls is not None):
+            obs = da_cmls.data.flatten()
+        
+        elif (da_gauges is not None):
+            obs = da_gauges.data.flatten()
+        
+        else:
+            msg = "provide da_cmls or da_gauges"
+            raise ValueError(msg)
+        
+        # Test that number of observations match init
+        if obs.size > self.n_obs:
+            msg = "observations does not match init, re-initialize"
+            raise ValueError(msg)
+
+        # Coordinates of neighbour
+        x_neighbours = self.x0[:, 0, int(self.x0.shape[2] / 2)]
+        y_neighbours = self.x0[:, 1, int(self.x0.shape[2] / 2)]
+        
+        # Get neighbourhood, links represented by midpoint
+        xgrid, ygrid = points[:, 0], points[:, 1]
+        tree_neighbors = scipy.spatial.KDTree(
+            data=list(zip(x_neighbours, y_neighbours))
+        )
+        distances, ixs = tree_neighbors.query(
+            list(zip(xgrid, ygrid)),
+            k=self.nnear,
+            distance_upper_bound=self.max_distance,
+        )
+
+        # Vectorized difference estimate
+        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
+        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        delta_y = self.x0[:, 0, :] - y_reshaped
+        delta_x = self.x0[:, 1, :] - x_reshaped
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
-        # Get the n closest links
-        indices = np.argpartition(lengths.min(axis=1), n_closest - 1)[:n_closest]
-        ind_mat = np.append(indices, [mat.shape[0] - 2, mat.shape[0] - 1])
-
-        # Calc the inverse, only dependent on geometry
-        a_inv = np.linalg.pinv(mat[np.ix_(ind_mat, ind_mat)])
-
         # Estimate expected variance for all links
-        cov_line_point = -variogram.variogram_function(
-            variogram.variogram_model_parameters,
-            lengths[indices],
-        ).mean(axis=1)
+        var_line_point = self.variogram(lengths).mean(axis = 2)
+        
+        # Array for storing estimate
+        estimate = np.zeros(xgrid.size)
+   
+        # Compute the contributions from nearby CMLs to points in grid
+        for i in range(xgrid.size):
+            # kdtree sets missing neighbours to len(neighbourhood)
+            ind = ixs[i][ixs[i] < self.n_obs]
+            
+            # Append the non-bias and rad indices to krigin matrix lookup
+            i_mat = np.append(ind, [self.n_obs - 1, self.n_obs])
+            
+            # Subtract withinblock covariance of the blocks
+            target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
-        # Subtract withinblock covariance of the blocks
-        target = -1 * (cov_line_point - cov_within[indices, indices])
+            # Add non bias condition and rad obs
+            target = np.append(target, [1, rad_field[i]])
+            
+            # Solve the kriging system
+            w = np.linalg.solve(self.mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
-        target = np.append(target, 1)  # non bias condition
-        target = np.append(target, rad_field_t[i])  # radar value
+            # Estimate rainfall amounts at location i
+            estimate[i] = obs[ind] @ w
 
-        # compuite weights
-        w = (a_inv @ target)[:-2]
-
-        # its then the sum of the CML values (eq 8, see paragraph after eq 15)
-        estimate[i] = obs[indices] @ w
-
-    rain[~mask] = estimate
-
-    return rain.reshape(xgrid.shape)
-
+        # Return dataset with interpolated values
+        return estimate
 
 def within_block_l(x0):
     """Calculate the lengths within all CMLs.
@@ -484,4 +544,135 @@ def construct_variogram(
         obs,
         variogram_parameters=variogram_parameters,
         variogram_model=variogram_model,
+    )
+
+# Functions for setting up x0 for gauges and CMLs
+def calculate_cml_line(ds_cmls, discretization=8):
+    """Calculate the position of points along CMLs.
+
+    Calculates the discretized CML line coordinates by dividing the CMLs into
+    discretization-number of intervals. The ds_cmls xarray object must contain the
+    projected coordinates (site_0_x, site_0_y, site_1_x site_1_y) defining
+    the start and end point of the CML.
+
+    Parameters
+    ----------
+    ds_cmls: xarray.Dataset
+        CML geometry as a xarray object. Must contain the coordinates
+        (site_0_x, site_0_y, site_1_x site_1_y)
+    discretization: int
+        Number of intervals to discretize lines into.
+
+    Returns
+    -------
+    x0: xr.DataArray
+        Array with coordinates for all CMLs. The array is organized into a 3D
+        matrix with the following structure:
+            (number of n CMLs [0, ..., n],
+             y/x-cooridnate [0(y), 1(x)],
+             interval [0, ..., discretization])
+
+    """
+    # Calculate discretized positions along the lines, store in numy array
+    xpos = np.zeros([ds_cmls.cml_id.size, discretization + 1])  # shape (line, position)
+    ypos = np.zeros([ds_cmls.cml_id.size, discretization + 1])
+
+    # For all CMLs
+    for block_i, cml_id in enumerate(ds_cmls.cml_id):
+        x_a = ds_cmls.sel(cml_id=cml_id).site_0_x.data
+        y_a = ds_cmls.sel(cml_id=cml_id).site_0_y.data
+        x_b = ds_cmls.sel(cml_id=cml_id).site_1_x.data
+        y_b = ds_cmls.sel(cml_id=cml_id).site_1_y.data
+
+        # for all dicretization steps in link estimate its place on the grid
+        for i in range(discretization + 1):
+            xpos[block_i, i] = x_a + (i / discretization) * (x_b - x_a)
+            ypos[block_i, i] = y_a + (i / discretization) * (y_b - y_a)
+
+    # Store x and y coordinates in the same array (n_cmls, y/x, discretization)
+    x0_cml = np.array([ypos, xpos]).transpose([1, 0, 2])
+
+    # Turn into xarray dataarray and return
+    return xr.DataArray(
+        x0_cml,
+        coords={
+            "cml_id": ds_cmls.cml_id.data,
+            "yx": ["y", "x"],
+            "discretization": np.arange(discretization + 1),
+        },
+    )
+
+
+def calculate_cml_midpoint(da_cml):
+    """Calculate DataArray with midpoints of CMLs
+
+    Calculates the CML midpoints and stores the results in an xr.DataArray.
+    The da_cml xarray object must contain the projected coordinates (site_0_x,
+    site_0_y, site_1_x site_1_y) defining the start and end point of the CML.
+
+    Parameters
+    ----------
+    da_cml: xarray.DataArray
+        CML geometry as a xarray object. Must contain the coordinates
+        (site_0_x, site_0_y, site_1_x site_1_y)
+
+    Returns
+    -------
+    x0: xr.DataArray
+        Array with midpoints for all CMLs. The array is organized into a 2D
+        matrix with the following structure:
+            (number of n CMLs [0, ..., n],
+             y/x-cooridnate [y, x],
+    """
+    # CML midpoint coordinates as columns
+    x = ((da_cml.site_0_x + da_cml.site_1_x) / 2).data
+    y = ((da_cml.site_0_y + da_cml.site_1_y) / 2).data
+
+    # CML midpoint coordinates as columns
+    x0_cml = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+
+    # Create dataarray and return
+    return xr.DataArray(
+        x0_cml,
+        coords={
+            "cml_id": da_cml.cml_id.data,
+            "yx": ["y", "x"],
+        },
+    )
+
+
+def calculate_gauge_midpoint(da_gauge):
+    """Calculate DataArray with coordinates of raingauge
+
+    Calculates the gauge coordinates and stores the results in an xr.DataArray.
+    The da_gauge xarray object must contain the projected coordinates (y, x)
+    defining the position of the raingauge.
+
+    Parameters
+    ----------
+    da_gauge: xarray.DataArray
+        Gauge coordinate as a xarray object. Must contain the coordinates (y, x)
+
+    Returns
+    -------
+    x0: xr.DataArray
+        Array with coordinates for all gauges. The array is organized into a 2D
+        matrix with the following structure:
+            (number of n gauges [0, ..., n],
+             y/x-cooridnate [y, x],
+    """
+    x0_gauge = np.hstack(
+        [
+            da_gauge.y.data.reshape(-1, 1),
+            da_gauge.x.data.reshape(-1, 1),
+        ]
+    )
+
+    # Create dataarray return
+    return xr.DataArray(
+        x0_gauge,
+        coords={
+            "id": da_gauge.id.data,
+            "yx": ["y", "x"],
+        },
     )
