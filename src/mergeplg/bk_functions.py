@@ -179,18 +179,19 @@ class OBKrigTree:
         var_line_point = self.variogram(lengths).mean(axis = 2)
         
         # Array for storing estimate
-        estimate = np.zeros(xgrid.size)
+        estimate = np.full_like(xgrid.ravel(), np.nan)
         
-        # Set indexes out of bounds equal 
+        # Skip cells without observations
+        visit = np.where(~(ixs == self.n_obs).all(axis=1))[0]
 
         # Compute the contributions from nearby CMLs to points in grid
-        for i in range(xgrid.size):
+        for i in visit:
             # Kdtree sets missing neighbours to len(observations),
             # also remove observations with nan 
             ind = ixs[i][ixs[i] < self.n_obs]
             not_nan = ~np.isnan(obs[ind])
             ind = ind[not_nan]
-
+            
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, self.n_obs)
             

@@ -18,11 +18,29 @@ class InterpolateIDW(Base):
         self,
         grid_location_radar="center",
         min_observations=5,
+        p=2,
+        idw_method="radolan",
+        nnear=8,
+        max_distance=60000,
     ):
+        """
+        p: float
+            IDW interpolation parameter
+        idw_method: str
+            by default "radolan"
+        nnear: int
+            number of neighbours to use for interpolation
+        max_distance: float
+            max distance allowed interpolation distance
+        """
         Base.__init__(self, grid_location_radar)
 
         # Minimum number of observations needed to perform interpolation
         self.min_observations = min_observations
+        self.p = p
+        self.idw_method=idw_method
+        self.nnear=nnear
+        self.max_distance=max_distance
 
     def update(self, da_cml=None, da_gauge=None):
         """Initilize interpolator if observations have changed.
@@ -33,9 +51,9 @@ class InterpolateIDW(Base):
         
         if (da_cml is not None) and (da_gauge is not None):
             cml_id_new = da_cml.cml_id.data
-            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
             gauge_id_new = da_gauge.id.data
-            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
             
             if gauge_change or cml_change:
                 y = np.concatenate(da_cml.y.data, da_gauge.y.data)
@@ -53,8 +71,8 @@ class InterpolateIDW(Base):
 
         elif da_cml is not None:
             cml_id_new = da_cml.cml_id.data
-            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = ~np.array_equal(None, self.gauge_ids)
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(None, self.gauge_ids)
             
             if gauge_change or cml_change:
                 y = da_cml.y.data
@@ -68,9 +86,9 @@ class InterpolateIDW(Base):
             return da_cml.data.flatten()
         
         elif da_gauge is not None:
-            cml_change = ~np.array_equal(None, self.cml_ids)
+            cml_change = not np.array_equal(None, self.cml_ids)
             gauge_id_new = da_gauge.id.data
-            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
             
             if gauge_change or cml_change:
                 y = da_gauge.y.data
@@ -88,15 +106,10 @@ class InterpolateIDW(Base):
         da_grid,
         da_cml=None,
         da_gauge=None,
-        p=2,
-        idw_method="radolan",
-        nnear=8,
-        max_distance=60000,
     ):
         """Interpolate observations for one time step using IDW
 
-        Interpolate observations for one time step. The function assumes that
-        the x0 are updated using the update class method.
+        Interpolate observations for one time step. 
 
         Input data can have a time dimension of length 1 or no time dimension.
 
@@ -111,14 +124,6 @@ class InterpolateIDW(Base):
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the coordinates projected
             coordinates (x, y).
-        p: float
-            IDW interpolation parameter
-        idw_method: str
-            by default "radolan"
-        nnear: int
-            number of neighbours to use for interpolation
-        max_distance: float
-            max distance allowed interpolation distance
 
         Returns
         -------
@@ -155,15 +160,15 @@ class InterpolateIDW(Base):
         coord_pred = np.hstack(
             [da_grid.y_grid.data.reshape(-1, 1), da_grid.x_grid.data.reshape(-1, 1)]
         )
-
+        
         # IDW interpolator invdisttree
         interpolated = self.interpolator(
             q=coord_pred,
-            z=obs[keep],
-            nnear=obs[keep].size if obs[keep].size <= nnear else nnear,
-            p=p,
-            idw_method=idw_method,
-            max_distance=max_distance,
+            z=obs,
+            nnear=obs.size if obs.size <= self.nnear else self.nnear,
+            p=self.p,
+            idw_method=self.idw_method,
+            max_distance=self.max_distance,
         ).reshape(da_grid.x_grid.shape)
 
         da_interpolated = xr.DataArray(
@@ -238,11 +243,13 @@ class InterpolateOrdinaryKriging(Base):
 
         if (da_cml is not None) and (da_gauge is not None):
             cml_id_new = da_cml.cml_id.data
-            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
             gauge_id_new = da_gauge.id.data
-            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
             
             if gauge_change or cml_change:
+                self.cml_ids = cml_id_new
+                self.gauge_ids = gauge_id_new
                 self.interpolator = bk_functions.OBKrigTree(
                     self.variogram,
                     ds_cmls=da_cml, 
@@ -261,10 +268,11 @@ class InterpolateOrdinaryKriging(Base):
 
         elif da_cml is not None:
             cml_id_new = da_cml.cml_id.data
-            cml_change = ~np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = ~np.array_equal(None, self.gauge_ids)
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(None, self.gauge_ids)
             
             if gauge_change or cml_change:
+                self.cml_ids = cml_id_new
                 self.interpolator = bk_functions.OBKrigTree(
                     self.variogram,
                     ds_cmls=da_cml, 
@@ -277,11 +285,13 @@ class InterpolateOrdinaryKriging(Base):
             return da_cml.data.flatten()
         
         elif da_gauge is not None:
-            cml_change = ~np.array_equal(None, self.cml_ids)
+            cml_change = not np.array_equal(None, self.cml_ids)
             gauge_id_new = da_gauge.id.data
-            gauge_change = ~np.array_equal(gauge_id_new, self.gauge_ids)
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
             
             if gauge_change or cml_change:
+                self.cml_ids = None
+                self.gauge_ids = gauge_id_new
                 self.interpolator = bk_functions.OBKrigTree(
                     self.variogram,
                     ds_gauges=da_cml, 
