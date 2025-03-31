@@ -358,8 +358,10 @@ class Base:
         # If CML and gauge data is provided
         if (da_cml is not None) and (da_gauge is not None):
             # Check that we have selected only one timestep
-            assert da_cml.time.size == 1, "Select only one time step"
-            assert da_gauge.time.size == 1, "Select only one time step"
+            if "time" in da_cml.coords:
+                assert da_cml.time.size == 1, "Select only one time step"
+            if "time" in da_gauge.coords:
+                assert da_gauge.time.size == 1, "Select only one time step"
 
             # Stack instrument observations at cml and gauge in correct order
             observations_ground = np.concatenate(
@@ -372,7 +374,8 @@ class Base:
         # If only CML data is provided
         elif da_cml is not None:
             # Check that we have selected only one timestep
-            assert da_cml.time.size == 1, "Select only one time step"
+            if "time" in da_cml.coords:
+                assert da_cml.time.size == 1, "Select only one time step"
 
             # Get CML data
             observations_ground = da_cml.data.ravel()
@@ -383,7 +386,8 @@ class Base:
         # If only rain gauge data is provided
         else:
             # Check that we have selected only one timestep
-            assert da_gauge.time.size == 1, "Select only one time step"
+            if "time" in da_gauge.coords:
+                assert da_gauge.time.size == 1, "Select only one time step"
 
             # Get gauge data
             observations_ground = da_gauge.data.ravel()
@@ -416,9 +420,12 @@ class Base:
         # If CML and gauge data is provided
         if (da_cml is not None) and (da_gauge is not None):
             # Check that we have selected only one timestep
-            assert da_grid.time.size == 1, "Select only one time step"
-            assert da_cml.time.size == 1, "Select only one time step"
-            assert da_gauge.time.size == 1, "Select only one time step"
+            if "time" in da_grid.coords:
+                assert da_grid.time.size == 1, "Select only one time step"
+            if "time" in da_cml.coords:
+                assert da_cml.time.size == 1, "Select only one time step"
+            if "time" in da_gauge.coords:
+                assert da_gauge.time.size == 1, "Select only one time step"
 
             if "time" not in da_grid.dims:
                 da_grid = da_grid.copy().expand_dims("time")
@@ -450,8 +457,10 @@ class Base:
         # If only CML data is provided
         elif da_cml is not None:
             # Check that we have selected only one timestep
-            assert da_grid.time.size == 1, "Select only one time step"
-            assert da_cml.time.size == 1, "Select only one time step"
+            if "time" in da_grid.coords:
+                assert da_grid.time.size == 1, "Select only one time step"
+            if "time" in da_cml.coords:
+                assert da_cml.time.size == 1, "Select only one time step"
 
             if "time" not in da_grid.dims:
                 da_grid = da_grid.copy().expand_dims("time")
@@ -472,8 +481,10 @@ class Base:
         # If only rain gauge data is provided
         else:
             # Check that we have selected only one timestep
-            assert da_grid.time.size == 1, "Select only one time step"
-            assert da_gauge.time.size == 1, "Select only one time step"
+            if "time" in da_grid.coords:
+                assert da_grid.time.size == 1, "Select only one time step"
+            if "time" in da_gauge.coords:
+                assert da_gauge.time.size == 1, "Select only one time step"
 
             # Estimate grid at gauges
             grid_at_obs = self.get_grid_at_points(

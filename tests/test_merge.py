@@ -189,6 +189,25 @@ def test_MergeDifferenceIDW_witout_time_dim_input_data():
     np.testing.assert_almost_equal(
         adjusted_with_time_dim.data, adjusted_without_time_dim.data
     )
+    # test case where also `time` coord or data_var is removed
+    adjusted_without_time_dim = merge_IDW.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
+        method="additive",
+    )
+    # same but with CMLs only
+    adjusted_without_time_dim = merge_IDW.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+        method="additive",
+    )
+    # same with both gauge and CML
+    adjusted_without_time_dim = merge_IDW.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
+        method="additive",
+    )
 
 
 def test_MergeDifferenceOrdinaryKriging():
@@ -428,6 +447,23 @@ def test_MergeDifferenceOrdinaryKriging_witout_time_dim_input_data():
         adjusted_with_time_dim.data, adjusted_without_time_dim.data
     )
 
+    # test case where also `time` coord or data_var is removed
+    adjusted_without_time_dim = merge_OK.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
+    )
+    # same but with CMLs only
+    adjusted_without_time_dim = merge_OK.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+    )
+    # same with both gauge and CML
+    adjusted_without_time_dim = merge_OK.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
+    )
+
 
 def test_MergeBlockKrigingExternalDrift():
     # CML and rain gauge overlapping sets
@@ -662,14 +698,14 @@ def test_MergeBlockKrigingExternalDrift():
 
 
 def test_MergeDifferenceKED_witout_time_dim_input_data():
-    merge_OK = merge.MergeKrigingExternalDrift(min_observations=2)
+    merge_KED = merge.MergeKrigingExternalDrift(min_observations=2)
     # test with gauge and CML data as input
-    adjusted_with_time_dim = merge_OK.adjust(
+    adjusted_with_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=[0]),
         da_cml=ds_cmls.R.isel(time=[0]),
         da_gauge=ds_gauges.R.isel(time=[0]),
     ).isel(time=0)
-    adjusted_without_time_dim = merge_OK.adjust(
+    adjusted_without_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=0),
         da_cml=ds_cmls.R.isel(time=0),
         da_gauge=ds_gauges.R.isel(time=0),
@@ -679,11 +715,11 @@ def test_MergeDifferenceKED_witout_time_dim_input_data():
     )
     # test with only CML data as input (we have to test that because
     # ,at the time of writing, the relevant code is different)
-    adjusted_with_time_dim = merge_OK.adjust(
+    adjusted_with_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=[0]),
         da_cml=ds_cmls.R.isel(time=[0]),
     ).isel(time=0)
-    adjusted_without_time_dim = merge_OK.adjust(
+    adjusted_without_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=0),
         da_cml=ds_cmls.R.isel(time=0),
     )
@@ -693,14 +729,30 @@ def test_MergeDifferenceKED_witout_time_dim_input_data():
     # test with only gauge data as input (at the time of writing, this
     # did not fail and was already covered by the behavior by `get_grid_at_points`
     # which uses `poligrain.spatial.GridAtPoints`)
-    adjusted_with_time_dim = merge_OK.adjust(
+    adjusted_with_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=[0]),
         da_gauge=ds_gauges.R.isel(time=[0]),
     ).isel(time=0)
-    adjusted_without_time_dim = merge_OK.adjust(
+    adjusted_without_time_dim = merge_KED.adjust(
         da_rad=ds_rad.R.isel(time=0),
         da_gauge=ds_gauges.R.isel(time=0),
     )
     np.testing.assert_almost_equal(
         adjusted_with_time_dim.data, adjusted_without_time_dim.data
+    )
+    # test case where also `time` coord or data_var is removed
+    adjusted_without_time_dim = merge_KED.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
+    )
+    # same but with CMLs only
+    adjusted_without_time_dim = merge_KED.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+    )
+    # same with both gauge and CML
+    adjusted_without_time_dim = merge_KED.adjust(
+        da_rad=ds_rad.R.isel(time=0).drop_vars("time"),
+        da_cml=ds_cmls.R.isel(time=0).drop_vars("time"),
+        da_gauge=ds_gauges.R.isel(time=0).drop_vars("time"),
     )
