@@ -34,8 +34,6 @@ class InterpolateIDW(Base):
             max distance allowed interpolation distance
         """
         Base.__init__(self, grid_location_radar)
-
-        # Minimum number of observations needed to perform interpolation
         self.min_observations = min_observations
         self.p = p
         self.idw_method=idw_method
@@ -48,59 +46,9 @@ class InterpolateIDW(Base):
         Checks cml and gauge names from previous run. Return observations
         in correct order. 
         """
+
+        return self.update_interpolator_idw_(da_cml, da_gauge)
         
-        if (da_cml is not None) and (da_gauge is not None):
-            cml_id_new = da_cml.cml_id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_id_new = da_gauge.id.data
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = np.concatenate(da_cml.y.data, da_gauge.y.data)
-                x = np.concatenate(da_cml.x.data, da_gauge.x.data)
-                self.cml_ids = cml_id_new
-                self.gauge_ids = gauge_id_new
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-            
-            # Get and return observations
-            return np.concatenate([
-                da_cml.data.flatten(),
-                da_gauge.data.flatten(),
-            ])
-
-        elif da_cml is not None:
-            cml_id_new = da_cml.cml_id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = not np.array_equal(None, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = da_cml.y.data
-                x = da_cml.x.data
-                self.cml_ids = cml_id_new
-                self.gauge_ids = None
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-
-            # Get and return observations
-            return da_cml.data.flatten()
-        
-        elif da_gauge is not None:
-            cml_change = not np.array_equal(None, self.cml_ids)
-            gauge_id_new = da_gauge.id.data
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = da_gauge.y.data
-                x = da_gauge.x.data
-                self.cml_ids = None
-                self.gauge_ids = gauge_id_new
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-
-            # Get and return observations
-            return da_gauge.data.flatten()
-
     def interpolate(
         self,
         da_grid,
@@ -145,11 +93,8 @@ class InterpolateIDW(Base):
         # Update interpolator
         obs = self.update(da_cml=da_cml, da_gauge=da_gauge)
 
-        # Get index of not-nan obs
-        keep = np.where(~np.isnan(obs))[0]
-
-        # Return gridded data with zeros if too few observations
-        if obs[keep].size <= self.min_observations:
+        # If few observations return zero grid
+        if (~np.isnan(obs)).sum() <= self.min_observations:
             return xr.DataArray(
                 data=[np.zeros(da_grid.x_grid.shape)],
                 coords=da_grid.coords,
@@ -241,67 +186,7 @@ class InterpolateOrdinaryKriging(Base):
         if needed.
         """
 
-        if (da_cml is not None) and (da_gauge is not None):
-            cml_id_new = da_cml.cml_id.data
-            gauge_id_new = da_gauge.id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                self.cml_ids = cml_id_new
-                self.gauge_ids = gauge_id_new
-                self.interpolator = bk_functions.OBKrigTree(
-                    self.variogram,
-                    ds_cmls=da_cml, 
-                    ds_gauges=da_cml, 
-                    discretization=self.discretization,
-                    nnear=self.nnear,
-                    max_distance=self.max_distance,
-                    full_line=self.full_line,
-                )
-            
-            # Get and return observations
-            return np.concatenate([
-                da_cml.data.flatten(),
-                da_gauge.data.flatten(),
-            ])
-
-        elif da_cml is not None:
-            cml_id_new = da_cml.cml_id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = not np.array_equal(None, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                self.cml_ids = cml_id_new
-                self.interpolator = bk_functions.OBKrigTree(
-                    self.variogram,
-                    ds_cmls=da_cml, 
-                    discretization=self.discretization,
-                    nnear=self.nnear,
-                    max_distance=self.max_distance,
-                )
-            
-            # Get and return observations
-            return da_cml.data.flatten()
-        
-        elif da_gauge is not None:
-            cml_change = not np.array_equal(None, self.cml_ids)
-            gauge_id_new = da_gauge.id.data
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                self.cml_ids = None
-                self.gauge_ids = gauge_id_new
-                self.interpolator = bk_functions.OBKrigTree(
-                    self.variogram,
-                    ds_gauges=da_cml, 
-                    discretization=self.discretization,
-                    nnear=self.nnear,
-                    max_distance=self.max_distance,
-                )
-            
-            # Get and return observations
-            return da_gauge.data.flatten()
+        return self.update_interpolator_obk_(da_cml, da_gauge)
 
     def interpolate(
         self,
@@ -354,6 +239,8 @@ class InterpolateOrdinaryKriging(Base):
                 coords=da_grid.coords,
                 dims=da_grid.dims,
             )
+
+        # Points to interpolate
         points = np.hstack([
             da_grid.y_grid.data.reshape(-1, 1),
             da_grid.x_grid.data.reshape(-1, 1),

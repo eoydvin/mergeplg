@@ -23,19 +23,92 @@ class MergeDifferenceIDW(Base):
         self,
         grid_location_radar="center",
         min_observations=5,
+        p=2,
+        idw_method="radolan",
+        nnear=8,
+        max_distance=60000,
     ):
+        """
+        p: float
+            IDW interpolation parameter
+        idw_method: str
+            by default "radolan"
+        nnear: int
+            number of neighbours to use for interpolation
+        max_distance: float
+            max distance allowed interpolation distance
+        """
         Base.__init__(self, grid_location_radar)
-
-        # Minimum number of observations needed to perform merging
         self.min_observations = min_observations
+        self.p = p
+        self.idw_method=idw_method
+        self.nnear=nnear
+        self.max_distance=max_distance
 
+    def update(self, da_rad, da_cml=None, da_gauge=None):
+        """Initilize interpolator if observations have changed.
+
+        Checks cml and gauge names from previous run. Return observations
+        in correct order. 
+        """
+        self.update_interpolator_idw_(da_cml=da_cml, da_gauge=da_gauge)
+        
+        if (da_cml is not None) and (da_gauge is not None):
+            cml_id_new = da_cml.cml_id.data
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = np.concatenate(da_cml.y.data, da_gauge.y.data)
+                x = np.concatenate(da_cml.x.data, da_gauge.x.data)
+                self.cml_ids = cml_id_new
+                self.gauge_ids = gauge_id_new
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+            
+            # Get and return observations
+            return np.concatenate([
+                da_cml.data.flatten(),
+                da_gauge.data.flatten(),
+            ])
+
+        elif da_cml is not None:
+            cml_id_new = da_cml.cml_id.data
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(None, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = da_cml.y.data
+                x = da_cml.x.data
+                self.cml_ids = cml_id_new
+                self.gauge_ids = None
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+
+            # Get and return observations
+            return da_cml.data.flatten()
+        
+        elif da_gauge is not None:
+            cml_change = not np.array_equal(None, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                y = da_gauge.y.data
+                x = da_gauge.x.data
+                self.cml_ids = None
+                self.gauge_ids = gauge_id_new
+                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
+                self.interpolator = idw.Invdisttree(yx)
+
+            # Get and return observations
+            return da_gauge.data.flatten()
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge
 
         This function uses the midpoint of the CML as CML reference.
         """
-        # Update x0 and radar weights
-        self.update_x0_(da_cml=da_cml, da_gauge=da_gauge)
         self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
