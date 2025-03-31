@@ -1,3 +1,0 @@
-[submodule "src/mergeplg/radolan/pycomlink"]
-	path = src/mergeplg/radolan/pycomlink
-	url = https://github.com/pycomlink/pycomlink.git
