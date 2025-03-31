@@ -295,4 +295,160 @@ class Base:
             
             # Get and return observations
             return da_gauge.data.flatten()
+    
+    def update_interpolator_ked_(self, da_cml=None, da_gauge=None):
+        if (da_cml is not None) and (da_gauge is not None):
+            cml_id_new = da_cml.cml_id.data
+            gauge_id_new = da_gauge.id.data
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.cml_ids = cml_id_new
+                self.gauge_ids = gauge_id_new
+                self.interpolator = bk_functions.BKEDTree(
+                    self.variogram,
+                    ds_cmls=da_cml, 
+                    ds_gauges=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                    full_line=self.full_line,
+                )
+            
+            # Get and return observations
+            return np.concatenate([
+                da_cml.data.flatten(),
+                da_gauge.data.flatten(),
+            ])
 
+        elif da_cml is not None:
+            cml_id_new = da_cml.cml_id.data
+            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
+            gauge_change = not np.array_equal(None, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.cml_ids = cml_id_new
+                self.interpolator = bk_functions.BKEDTree(
+                    self.variogram,
+                    ds_cmls=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                )
+            
+            # Get and return observations
+            return da_cml.data.flatten()
+        
+        elif da_gauge is not None:
+            cml_change = not np.array_equal(None, self.cml_ids)
+            gauge_id_new = da_gauge.id.data
+            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
+            
+            if gauge_change or cml_change:
+                self.cml_ids = None
+                self.gauge_ids = gauge_id_new
+                self.interpolator = bk_functions.BKEDTree(
+                    self.variogram,
+                    ds_gauges=da_cml, 
+                    discretization=self.discretization,
+                    nnear=self.nnear,
+                    max_distance=self.max_distance,
+                )
+            
+            # Get and return observations
+            return da_gauge.data.flatten()
+
+    def get_grid_obs_(self, da_grid, da_cml=None, da_gauge=None):
+        """Calculate grid and obs for current state
+
+        Returns and ordered list of the gridded data at the position of the
+        ground observations and ground observations (CML and rain gauges)
+
+        Parameters
+        ----------
+        da_grid: xarray.DataArray
+            Gridded rainfall data. Must contain the projected x_grid and Y_grid
+            coordinates.
+        da_cml: xarray.DataArray
+            CML observations. Must contain the projected coordinates for the CML
+            positions (site_0_x, site_0_y, site_1_x, site_1_y).
+        da_gauge: xarray.DataArray
+            Gauge observations. Must contain the projected coordinates for the rain
+            gauge positions (x, y)
+        """
+        # If CML and gauge data is provided
+        if (da_cml is not None) and (da_gauge is not None):
+            # Calculate grid along CMLs using intersect weights
+            grid_cml = (
+                plg.spatial.get_grid_time_series_at_intersections(
+                    grid_data=da_grid,
+                    intersect_weights=self.intersect_weights,
+                )
+            ).data.ravel()
+
+            # Estimate grid at gauges
+            grid_gauge = self.get_grid_at_points(
+                da_gridded_data=da_grid,
+                da_point_data=da_gauge,
+            ).data.ravel()
+
+            # Stack grid observations at cml and gauge in correct order
+            grid_at_obs = np.concatenate([grid_cml, grid_gauge])
+
+            # Stack instrument observations at cml and gauge in correct order
+            observations_ground = np.concatenate(
+                [da_cml.data.ravel(), da_gauge.data.ravel()]
+            )
+
+        # If only CML data is provided
+        elif da_cml is not None:
+            # Estimate grid at cml
+            grid_at_obs = (
+                plg.spatial.get_grid_time_series_at_intersections(
+                    grid_data=da_grid,
+                    intersect_weights=self.intersect_weights,
+                )
+            ).data.ravel()
+
+            # Get CML data
+            observations_ground = da_cml.data.ravel()
+
+        # If only rain gauge data is provided
+        else:
+            # Estimate grid at gauges
+            grid_at_obs = self.get_grid_at_points(
+                da_gridded_data=da_grid,
+                da_point_data=da_gauge,
+            ).data.ravel()
+
+            # Get gauge data
+            observations_ground = da_gauge.data.ravel()
+
+        # Return grid_at_observations, observations
+        return grid_at_obs, observations_ground
+
+    def get_obs_(self, da_cml=None, da_gauge=None):
+        """Calculate ground observations given data
+
+        Returns and ordered list of ground observations
+
+        Parameters
+        ----------
+        da_cml: xarray.DataArray
+            CML observations. 
+        da_gauge: xarray.DataArray
+            gauge observations. 
+        """
+        if (da_cml is not None) and (da_gauge is not None):
+            observations_ground = np.concatenate(
+                [da_cml.data.ravel(), da_gauge.data.ravel()]
+            )
+
+        elif da_cml is not None:
+            observations_ground = da_cml.data.ravel()
+
+        else:
+            observations_ground = da_gauge.data.ravel()
+
+        return observations_ground

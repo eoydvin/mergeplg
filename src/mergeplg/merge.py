@@ -22,11 +22,13 @@ class MergeDifferenceIDW(Base):
     def __init__(
         self,
         grid_location_radar="center",
-        min_observations=5,
+        min_observations=1,
         p=2,
         idw_method="radolan",
         nnear=8,
         max_distance=60000,
+        method="additive",
+        keep_function=None,
     ):
         """
         p: float
@@ -44,84 +46,24 @@ class MergeDifferenceIDW(Base):
         self.idw_method=idw_method
         self.nnear=nnear
         self.max_distance=max_distance
+        self.method = method
+        self.keep_function=keep_function
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
-        """Initilize interpolator if observations have changed.
+        """ Update weights and init interpolator.
 
         Checks cml and gauge names from previous run. Return observations
         in correct order. 
         """
-        self.update_interpolator_idw_(da_cml=da_cml, da_gauge=da_gauge)
         
-        if (da_cml is not None) and (da_gauge is not None):
-            cml_id_new = da_cml.cml_id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_id_new = da_gauge.id.data
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = np.concatenate(da_cml.y.data, da_gauge.y.data)
-                x = np.concatenate(da_cml.x.data, da_gauge.x.data)
-                self.cml_ids = cml_id_new
-                self.gauge_ids = gauge_id_new
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-            
-            # Get and return observations
-            return np.concatenate([
-                da_cml.data.flatten(),
-                da_gauge.data.flatten(),
-            ])
-
-        elif da_cml is not None:
-            cml_id_new = da_cml.cml_id.data
-            cml_change = not np.array_equal(cml_id_new, self.cml_ids)
-            gauge_change = not np.array_equal(None, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = da_cml.y.data
-                x = da_cml.x.data
-                self.cml_ids = cml_id_new
-                self.gauge_ids = None
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-
-            # Get and return observations
-            return da_cml.data.flatten()
-        
-        elif da_gauge is not None:
-            cml_change = not np.array_equal(None, self.cml_ids)
-            gauge_id_new = da_gauge.id.data
-            gauge_change = not np.array_equal(gauge_id_new, self.gauge_ids)
-            
-            if gauge_change or cml_change:
-                y = da_gauge.y.data
-                x = da_gauge.x.data
-                self.cml_ids = None
-                self.gauge_ids = gauge_id_new
-                yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
-                self.interpolator = idw.Invdisttree(yx)
-
-            # Get and return observations
-            return da_gauge.data.flatten()
-    def update(self, da_rad, da_cml=None, da_gauge=None):
-        """Update weights and x0 geometry for CML and gauge
-
-        This function uses the midpoint of the CML as CML reference.
-        """
         self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        self.update_interpolator_idw_(da_cml=da_cml, da_gauge=da_gauge)
 
     def adjust(
         self,
         da_rad,
         da_cml=None,
         da_gauge=None,
-        p=2,
-        idw_method="radolan",
-        nnear=8,
-        max_distance=60000,
-        method="additive",
-        keep_function=None,
     ):
         """Adjust radar field for one time step.
 
@@ -138,37 +80,28 @@ class MergeDifferenceIDW(Base):
             projected midpoint coordinates (x, y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the projected coordinates (x, y).
-        p: float
-            IDW interpolation parameter
-        idw_method: str
-            by default "radolan"
-        n_closest: int
-            Number of neighbours to use for interpolation.
-        max_distance: float
-            max distance allowed interpolation distance
-        method: str
-            Set to 'additive' to use additive approach, or 'multiplicative' to
-            use the multiplicative approach.
-        keep_function: function
-            Function that evaluates what differences to keep or not
-
+        
         Returns
         -------
         da_rad_out: xarray.DataArray
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        # Update weights and x0 geometry for CML and gauge
+        # Update function with new weights
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs = self.get_grid_obs_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+
+        # If few observations return zero grid
+        if (~np.isnan(obs)).sum() <= self.min_observations:
+            return da_rad
 
         # Calculate radar-ground difference
-        if method == "additive":
+        if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
 
-        elif method == "multiplicative":
+        elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
@@ -177,41 +110,26 @@ class MergeDifferenceIDW(Base):
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
 
-        # Default decision on which observations to keep
-        if not keep_function:
-            keep = np.where(~np.isnan(diff))[0]
-        else:
-            keep = keep_function([diff, rad, obs, x0])
-
-        # Return gridded data if too few observations
-        if obs[keep].size <= self.min_observations:
-            return da_rad
-
-        # Ensure same functionality as in kriging
-        if not nnear:
-            nnear = obs[keep].size
-
         # Coordinates to predict
         coord_pred = np.hstack(
             [da_rad.y_grid.data.reshape(-1, 1), da_rad.x_grid.data.reshape(-1, 1)]
         )
 
         # IDW interpolator invdisttree
-        idw_interpolator = idw.Invdisttree(x0[keep])
-        interpolated = idw_interpolator(
+        interpolated = self.interpolator(
             q=coord_pred,
-            z=diff[keep],
-            nnear=obs[keep].size if obs[keep].size <= nnear else nnear,
-            p=p,
-            idw_method=idw_method,
-            max_distance=max_distance,
+            z=diff,
+            nnear=obs.size if obs.size <= self.nnear else self.nnear,
+            p=self.p,
+            idw_method=self.idw_method,
+            max_distance=self.max_distance,
         ).reshape(da_rad.x_grid.shape)
 
         # Adjust radar field
-        if method == "additive":
+        if self.method == "additive":
             adjusted = interpolated + da_rad
             adjusted.data[adjusted < 0] = 0
-        elif method == "multiplicative":
+        elif self.method == "multiplicative":
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
@@ -232,17 +150,49 @@ class MergeDifferenceOrdinaryKriging(Base):
 
     def __init__(
         self,
+        variogram_model="spherical",
+        variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=5,
+        min_observations=1,
+        method="additive",
+        nnear=8,
+        max_distance=60000,
+        full_line=True,
     ):
+        """
+        Parameters
+        ----------
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
+        nnear: int
+            Number of closest links to use for interpolation
+        max_distance: float
+            Largest distance allowed for including an observation.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        """
         Base.__init__(self, grid_location_radar)
 
-        # Number of discretization points along CML
         self.discretization = discretization
-
-        # Minimum number of observations needed to perform merging
         self.min_observations = min_observations
+        self.nnear = nnear
+        self.max_distance = max_distance
+        self.full_line=full_line
+        self.method=method
+
+        # Construct variogram using parameters provided by user
+        if variogram_parameters is None:
+            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
+        obs = np.array([0, 1]) # dummy variables
+        coord = np.array([[0, 1], [1, 0]])
+
+        self.variogram = bk_functions.construct_variogram(
+            obs, coord, variogram_parameters, variogram_model
+        )
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
@@ -251,19 +201,13 @@ class MergeDifferenceOrdinaryKriging(Base):
         appear as a rain gauge.
         """
         self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
+        self.update_interpolator_obk_(da_cml, da_gauge)
 
     def adjust(
         self,
         da_rad,
         da_cml=None,
         da_gauge=None,
-        variogram_model="spherical",
-        variogram_parameters=None,
-        nnear=8,
-        full_line=True,
-        method="additive",
-        keep_function=None,
     ):
         """Interpolate observations for one time step.
 
@@ -302,21 +246,18 @@ class MergeDifferenceOrdinaryKriging(Base):
             DataArray with the same structure as the ds_rad but with the
             interpolated field.
         """
-        # Initialize variogram parameters
-        if variogram_parameters is None:
-            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
 
         # Update weights and x0 geometry for CML and gauge
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad, obs = self.get_grid_obs_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Calculate radar-ground difference
-        if method == "additive":
+        if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
 
-        elif method == "multiplicative":
+        elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
@@ -325,50 +266,27 @@ class MergeDifferenceOrdinaryKriging(Base):
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
 
-        # Default decision on which observations to keep
-        if not keep_function:
-            keep = np.where(~np.isnan(diff))[0]
-        else:
-            keep = keep_function([diff, rad, obs, x0])
-
-        # Return gridded data if too few observations
-        if obs[keep].size <= self.min_observations:
+        # If few observations return zero grid
+        if (~np.isnan(obs)).sum() <= self.min_observations:
             return da_rad
 
-        # Force interpolator to use only midpoint, if specified by user
-        x0 = x0[:, :, [int(x0.shape[2] / 2)]] if full_line is False else x0
+        # Points to interpolate
+        points = np.hstack([
+            da_rad.y_grid.data.reshape(-1, 1),
+            da_rad.x_grid.data.reshape(-1, 1),
+        ])
 
-        # Construct variogram using parameters provided by user
-        variogram = bk_functions.construct_variogram(
-            obs[keep], x0[keep], variogram_parameters, variogram_model
-        )
-
-        # If nnear is set to False, use all observations in kriging
-        if not nnear:
-            interpolated = bk_functions.interpolate_block_kriging(
-                da_rad.x_grid.data,
-                da_rad.y_grid.data,
-                diff[keep],
-                x0[keep],
-                variogram,
-            )
-
-        # Else do neighbourhood kriging
-        else:
-            interpolated = bk_functions.interpolate_neighbourhood_block_kriging(
-                da_rad.x_grid.data,
-                da_rad.y_grid.data,
-                diff[keep],
-                x0[keep],
-                variogram,
-                diff[keep].size if diff[keep].size <= nnear else nnear,
-            )
+        # Neighbourhood kriging
+        interpolated = self.interpolator(
+            points,
+            obs
+        ).reshape(da_rad.x_grid.shape)
 
         # Adjust radar field
-        if method == "additive":
+        if self.method == "additive":
             adjusted = interpolated + da_rad
             adjusted.data[adjusted < 0] = 0
-        elif method == "multiplicative":
+        elif self.method == "multiplicative":
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
@@ -385,44 +303,70 @@ class MergeKrigingExternalDrift(Base):
 
     def __init__(
         self,
+        variogram_model="spherical",
+        variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=5,
+        min_observations=1,
+        method="additive",
+        nnear=8,
+        max_distance=60000,
+        full_line=True,
     ):
+        """
+        Parameters
+        ----------
+        variogram_model: str
+            Must be a valid variogram type in pykrige.
+        variogram_parameters: str
+            Must be a valid parameters corresponding to variogram_model.
+        nnear: int
+            Number of closest links to use for interpolation
+        max_distance: float
+            Largest distance allowed for including an observation.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        """
         Base.__init__(self, grid_location_radar)
 
-        # Number of discretization points along CML
         self.discretization = discretization
-
-        # Minimum number of observations needed to perform merging
         self.min_observations = min_observations
+        self.nnear = nnear
+        self.max_distance = max_distance
+        self.full_line=full_line
+        self.method=method
+
+        # Construct variogram using parameters provided by user
+        if variogram_parameters is None:
+            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
+        obs = np.array([0, 1]) # dummy variables
+        coord = np.array([[0, 1], [1, 0]])
+
+        self.variogram = bk_functions.construct_variogram(
+            obs, coord, variogram_parameters, variogram_model
+        )
 
     def update(self, da_rad, da_cml=None, da_gauge=None):
         """Update weights and x0 geometry for CML and gauge assuming block data
 
-        This function initializes x0 on block form.
+        This function uses the full CML geometry and makes the gauge geometry
+        appear as a rain gauge.
         """
         self.update_weights_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
-        self.update_x0_block_(self.discretization, da_cml=da_cml, da_gauge=da_gauge)
+        self.update_interpolator_ked_(da_cml, da_gauge)
 
     def adjust(
         self,
         da_rad,
         da_cml=None,
         da_gauge=None,
-        variogram_model="spherical",
-        variogram_parameters=None,
-        n_closest=8,
-        keep_function=None,
     ):
         """Adjust radar field for one time step.
 
         Evaluates if we have enough observations to adjust the radar field.
         Then adjust radar field to observations using a block kriging variant
         of kriging with external drift.
-
-        The function allows for the user to supply transformation,
-        backtransformation and variogram functions.
 
         Parameters
         ----------
@@ -434,14 +378,6 @@ class MergeKrigingExternalDrift(Base):
             (site_0_x, site_0_y, site_1_x, site_1_y).
         da_gauge: xarray.DataArray
             Gauge observations. Must contain the projected coordinates (x, y).
-        variogram_model: str
-            Must be a valid variogram type in pykrige.
-        variogram_parameters: str
-            Must be a valid parameters corresponding to variogram_model.
-        n_closest: int
-            Number of closest links to use for interpolation
-        keep_function: Function
-            Function that decides what obserations to keep
 
         Returns
         -------
@@ -449,30 +385,20 @@ class MergeKrigingExternalDrift(Base):
             DataArray with the same structure as the ds_rad but with the CML
             adjusted radar field.
         """
-        # Initialize variogram parameters
-        if variogram_parameters is None:
-            variogram_parameters = {"sill": 0.9, "range": 5000, "nugget": 0.1}
 
-        # Update weights and x0 geometry for CML and gauge
+        # Update 
         self.update(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
         # Evaluate radar at cml and gauge ground positions
-        rad, obs, x0 = self.get_grid_obs_x0_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
+        rad_obs, obs = self.get_grid_obs_(da_rad, da_cml=da_cml, da_gauge=da_gauge)
 
-        # Default decision on which observations to keep
-        if not keep_function:
-            keep = np.where(~np.isnan(obs) & ~np.isnan(rad) & (obs > 0) & (rad > 0))[0]
-        else:
-            keep = keep_function([rad, obs, x0])
+        # Default decision on which observations to ignore
+        ignore = np.isnan(rad_obs) & (obs == 0) & (rad_obs == 0)
+        obs[ignore] = np.nan
 
-        # Return gridded data if too few observations
-        if obs[keep].size <= self.min_observations:
+        # If few observations return zero grid
+        if (~np.isnan(obs)).sum() <= self.min_observations:
             return da_rad
-
-        # Construct variogram using parameters provided by user
-        variogram = bk_functions.construct_variogram(
-            obs[keep], x0[keep], variogram_parameters, variogram_model
-        )
 
         # Remove radar time dimension
         rad_field = da_rad.isel(time=0).data if "time" in da_rad.dims else da_rad.data
@@ -480,16 +406,17 @@ class MergeKrigingExternalDrift(Base):
         # Set zero values to nan, these are ignored in ked function
         rad_field[rad_field <= 0] = np.nan
 
+        # Points to interpolate (correponds to radar)
+        points = np.hstack([
+            da_rad.y_grid.data.reshape(-1, 1),
+            da_rad.x_grid.data.reshape(-1, 1),
+        ])
+
         # do addtitive IDW merging
-        adjusted = bk_functions.merge_ked_blockkriging(
-            rad_field,
-            da_rad.x_grid.data,
-            da_rad.y_grid.data,
-            rad[keep],
-            obs[keep],
-            x0[keep],
-            variogram,
-            obs[keep].size if obs[keep].size <= n_closest else n_closest,
+        adjusted = self.interpolator(
+            points,
+            rad_field.ravel(),
+            obs,
         )
 
         # Remove negative values

@@ -47,7 +47,7 @@ class InterpolateIDW(Base):
         in correct order. 
         """
 
-        return self.update_interpolator_idw_(da_cml, da_gauge)
+        self.update_interpolator_idw_(da_cml, da_gauge)
         
     def interpolate(
         self,
@@ -91,7 +91,8 @@ class InterpolateIDW(Base):
             time_dim_was_expanded = True
 
         # Update interpolator
-        obs = self.update(da_cml=da_cml, da_gauge=da_gauge)
+        self.update(da_cml=da_cml, da_gauge=da_gauge)
+        obs = self.get_obs_(da_cml=da_cml, da_gauge=da_gauge)
 
         # If few observations return zero grid
         if (~np.isnan(obs)).sum() <= self.min_observations:
@@ -167,7 +168,7 @@ class InterpolateOrdinaryKriging(Base):
         self.min_observations = min_observations
         self.nnear = nnear
         self.max_distance = max_distance
-        self.full_line=True
+        self.full_line=full_line
 
         # Construct variogram using parameters provided by user
         if variogram_parameters is None:
@@ -186,7 +187,7 @@ class InterpolateOrdinaryKriging(Base):
         if needed.
         """
 
-        return self.update_interpolator_obk_(da_cml, da_gauge)
+        self.update_interpolator_obk_(da_cml, da_gauge)
 
     def interpolate(
         self,
@@ -230,7 +231,8 @@ class InterpolateOrdinaryKriging(Base):
             time_dim_was_expanded = True
 
         # Check if the cml or rain gauges are updated
-        obs = self.update(da_cml=da_cml, da_gauge=da_gauge)
+        self.update(da_cml=da_cml, da_gauge=da_gauge)
+        obs = self.get_obs_(da_cml=da_cml, da_gauge=da_gauge)
         
         # If few observations return zero grid
         if (~np.isnan(obs)).sum() <= self.min_observations:
@@ -249,8 +251,7 @@ class InterpolateOrdinaryKriging(Base):
         # Else do neighbourhood kriging
         interpolated = self.interpolator(
             points,
-            da_cmls=da_cml,
-            da_gauges= da_gauge,
+            obs
         ).reshape(da_grid.x_grid.shape)
 
         da_interpolated = xr.DataArray(
