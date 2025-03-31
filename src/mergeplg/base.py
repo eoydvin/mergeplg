@@ -420,6 +420,8 @@ class Base:
             assert da_cml.time.size == 1, "Select only one time step"
             assert da_gauge.time.size == 1, "Select only one time step"
 
+            if "time" not in da_grid.dims:
+                da_grid = da_grid.copy().expand_dims("time")
             # Calculate grid along CMLs using intersect weights
             grid_cml = (
                 plg.spatial.get_grid_time_series_at_intersections(
@@ -451,6 +453,8 @@ class Base:
             assert da_grid.time.size == 1, "Select only one time step"
             assert da_cml.time.size == 1, "Select only one time step"
 
+            if "time" not in da_grid.dims:
+                da_grid = da_grid.copy().expand_dims("time")
             # Estimate grid at cml
             grid_at_obs = (
                 plg.spatial.get_grid_time_series_at_intersections(

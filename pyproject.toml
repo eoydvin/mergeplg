@@ -39,7 +39,7 @@ nbsphinx = { version = "*", optional = true }
 nbmake = { version = ">=1.4.6", optional = true}
 ipython = { version = "*", optional = true }
 pykrige = ">=1.7.2"
-poligrain = ">=0.1.0"
+poligrain = ">=0.3.0"
 scipy = ">=1.14.0"
 numpy = ">=2.0.1"
 pandas = ">=2.2.2"
