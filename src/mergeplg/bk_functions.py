@@ -144,6 +144,10 @@ class OBKrigTree:
         x_neighbours = self.x0[keep_obs, 0, int(self.x0.shape[2] / 2)]
         y_neighbours = self.x0[keep_obs, 1, int(self.x0.shape[2] / 2)]
         
+        # Return zero if no observations
+        if x_neighbours.size == 0:
+            return np.zeros(points.shape[0])
+
         # Get neighbourhood, links represented by midpoint
         xgrid, ygrid = points[:, 0], points[:, 1]
         tree_neighbors = scipy.spatial.KDTree(
@@ -151,10 +155,10 @@ class OBKrigTree:
         )
         distances, ixs = tree_neighbors.query(
             list(zip(xgrid, ygrid)),
-            k=self.nnear,
+            k=self.x0.shape[0], # get all nearby, strip later
             distance_upper_bound=self.max_distance,
         )
-
+        
         # Vectorized difference estimate
         y_reshaped = points[:, 0, np.newaxis, np.newaxis]
         x_reshaped = points[:, 1, np.newaxis, np.newaxis]
@@ -165,17 +169,25 @@ class OBKrigTree:
         # Estimate expected variance for all links
         var_line_point = self.variogram(lengths).mean(axis = 2)
         
-        # Array for storing estimate
-        estimate = np.zeros(xgrid.size)
-        
         # Number of not nan observations
         n_obs = keep_obs.sum()
+        
+        # Mask for tracking cells to ignore
+        mask = (ixs == n_obs).all(axis=1)
+
+        rain = np.full_like(xgrid, 0)
+
+        # Gridpoints to use
+        xgrid_t, ygrid_t, ixs = xgrid[~mask], ygrid[~mask], ixs[~mask]
+
+        # array for storing CML-radar merge
+        estimate = np.zeros(xgrid_t.size)
 
         # Compute the contributions from nearby CMLs to points in grid
-        for i in range(xgrid.size):
+        for i in range(xgrid_t.size):
             # Kdtree sets missing neighbours to len(observations),
-            # also remove observations with nan 
-            ind = ixs[i][ixs[i] < n_obs]
+            ind = ixs[i][ixs[i] < n_obs][:self.nnear]
+
 
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, self.n_obs) # n_obs is the last element
@@ -191,9 +203,10 @@ class OBKrigTree:
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
-
+        
         # Return dataset with interpolated values
-        return estimate
+        rain[~mask] = estimate
+        return rain
 
 class BKEDTree:
     """ Block kriging with external drift merging using KDTree. 
@@ -236,7 +249,7 @@ class BKEDTree:
         max_distance: float
             Max distance for including observation in neighbourhood.
         """
-        if ds_cmls and ds_gauges:
+        if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
             x0_cml = calculate_cml_line(ds_cmls).data
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
@@ -249,11 +262,11 @@ class BKEDTree:
             # Store cml and gauge block geometry
             x0 = np.vstack([x0_cml, x0_gauge])
 
-        elif ds_cmls:
+        elif (ds_cmls is not None):
             # Get structured coordinates of CML and store
             x0 = calculate_cml_line(ds_cmls).data
             
-        elif ds_gauges:
+        elif (ds_gauges is not None):
             # Get structured coordinates of rain gauge
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
             
@@ -294,6 +307,7 @@ class BKEDTree:
         self.mat = mat
         self.x0 = x0
         self.var_within = np.diag(var_within)
+        self.n_obs = self.var_within.size
         self.variogram = variogram
         self.nnear = nnear
         self.max_distance = max_distance
@@ -338,6 +352,10 @@ class BKEDTree:
         # Coordinates of neighbour
         x_neighbours = self.x0[keep_obs, 0, int(self.x0.shape[2] / 2)]
         y_neighbours = self.x0[keep_obs, 1, int(self.x0.shape[2] / 2)]
+
+        # Return zero if no observations
+        if x_neighbours.size == 0:
+            return np.zeros(points.shape[0])
         
         # Get neighbourhood, links represented by midpoint
         xgrid, ygrid = points[:, 0], points[:, 1]
@@ -346,7 +364,7 @@ class BKEDTree:
         )
         distances, ixs = tree_neighbors.query(
             list(zip(xgrid, ygrid)),
-            k=self.nnear,
+            k=self.x0.shape[0], # all possible 
             distance_upper_bound=self.max_distance,
         )
 
@@ -360,9 +378,13 @@ class BKEDTree:
         # Estimate expected variance for all links
         var_line_point = self.variogram(lengths).mean(axis = 2)
         
-        # Skip radar pixels with np.nan
-        mask = np.isnan(rad_field)
-        rain = np.full_like(rad_field, np.nan)
+        # Number of not nan observations
+        n_obs = keep_obs.sum()
+        
+        # Skip radar pixels with np.nan, more than 2 observations
+        mask = np.isnan(rad_field) | ((ixs != n_obs).sum(axis=1) <= 1)
+        ixs = ixs[~mask]
+        rain = np.full_like(rad_field, 0)
 
         # Gridpoints to use
         xgrid_t, ygrid_t = xgrid[~mask], ygrid[~mask]
@@ -370,32 +392,29 @@ class BKEDTree:
 
         # array for storing CML-radar merge
         estimate = np.zeros(xgrid_t.shape)
-   
-        # Number of not nan observations
-        n_obs = keep_obs.sum()
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(xgrid_t.size):
             # Kdtree sets missing neighbours to len(observations),
-            ind = ixs[i][ixs[i] < n_obs]
+            ind = ixs[i][ixs[i] < n_obs][:self.nnear]
             
             # Append the non-bias and rad indices to krigin matrix lookup
-            i_mat = np.append(ind, [self.n_obs - 1, self.n_obs])
-            
+            i_mat = np.append(ind, [self.n_obs, self.n_obs+1])
+           
             # Subtract withinblock covariance of the blocks
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
-
+            
             # Add non bias condition and rad obs
             target = np.append(target, [1, rad_field[i]])
-            
+
             # Solve the kriging system
-            w = np.linalg.solve(self.mat[np.ix_(i_mat, i_mat)], target)[:-2]
+            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
 
         # Return dataset with interpolated values
-        rain[mask] = estimate
+        rain[~mask] = estimate
         return rain
 
 def within_block_l(x0):

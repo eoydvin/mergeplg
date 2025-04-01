@@ -186,6 +186,8 @@ class Base:
                 y = np.concatenate(da_cml.y.data, da_gauge.y.data)
                 x = np.concatenate(da_cml.x.data, da_gauge.x.data)
                 self.cml_ids = cml_id_new
+                self.x = x
+                self.y = y
                 self.gauge_ids = gauge_id_new
                 yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
                 self.interpolator = idw.Invdisttree(yx)
@@ -204,6 +206,8 @@ class Base:
             if gauge_change or cml_change:
                 y = da_cml.y.data
                 x = da_cml.x.data
+                self.x = x
+                self.y = y
                 self.cml_ids = cml_id_new
                 self.gauge_ids = None
                 yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
@@ -221,6 +225,8 @@ class Base:
                 y = da_gauge.y.data
                 x = da_gauge.x.data
                 self.cml_ids = None
+                self.x = x
+                self.y = y
                 self.gauge_ids = gauge_id_new
                 yx = np.hstack([y.reshape(-1, 1), x.reshape(-1, 1)])
                 self.interpolator = idw.Invdisttree(yx)
@@ -326,7 +332,6 @@ class Base:
             cml_id_new = da_cml.cml_id.data
             cml_change = not np.array_equal(cml_id_new, self.cml_ids)
             gauge_change = not np.array_equal(None, self.gauge_ids)
-            
             if gauge_change or cml_change:
                 self.cml_ids = cml_id_new
                 self.interpolator = bk_functions.BKEDTree(

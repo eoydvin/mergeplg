@@ -114,6 +114,12 @@ class MergeDifferenceIDW(Base):
         coord_pred = np.hstack(
             [da_rad.y_grid.data.reshape(-1, 1), da_rad.x_grid.data.reshape(-1, 1)]
         )
+        
+        keep = ~np.isnan(diff)
+        
+        import matplotlib.pyplot as plt
+        plt.scatter(self.y[keep], self.x[keep], diff[keep], markersize=40)
+        plt.show()
 
         # IDW interpolator invdisttree
         interpolated = self.interpolator(
@@ -279,7 +285,7 @@ class MergeDifferenceOrdinaryKriging(Base):
         # Neighbourhood kriging
         interpolated = self.interpolator(
             points,
-            obs
+            diff
         ).reshape(da_rad.x_grid.shape)
 
         # Adjust radar field
@@ -394,7 +400,7 @@ class MergeKrigingExternalDrift(Base):
 
         # Default decision on which observations to ignore
         ignore = np.isnan(rad_obs) & (obs == 0) & (rad_obs == 0)
-        obs[ignore] = np.nan
+        obs[ignore] = np.nan # obs nan ar ignored in KED function
 
         # If few observations return zero grid
         if (~np.isnan(obs)).sum() <= self.min_observations:
@@ -412,12 +418,15 @@ class MergeKrigingExternalDrift(Base):
             da_rad.x_grid.data.reshape(-1, 1),
         ])
 
-        # do addtitive IDW merging
+
+        # do KED merging
         adjusted = self.interpolator(
             points,
             rad_field.ravel(),
             obs,
-        )
+            rad_obs
+        ).reshape(da_rad.x_grid.shape)
+
 
         # Remove negative values
         adjusted[(adjusted < 0) | np.isnan(adjusted)] = 0

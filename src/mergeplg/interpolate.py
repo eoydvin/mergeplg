@@ -248,7 +248,7 @@ class InterpolateOrdinaryKriging(Base):
             da_grid.x_grid.data.reshape(-1, 1),
         ])
         
-        # Else do neighbourhood kriging
+        # Neighbourhood kriging
         interpolated = self.interpolator(
             points,
             obs
