@@ -20,10 +20,12 @@ class OBKrigTree:
     def __init__(
             self, 
             variogram,
+            ds_grid,
             ds_cmls=None, 
             ds_gauges=None, 
             discretization=8,
             nnear=8,
+            nnear_mult=2,
             max_distance=60000,
             full_line=True,
             ):
@@ -48,6 +50,9 @@ class OBKrigTree:
             Number of intervals to discretize the CML into.
         nnear: int
             Number of neighbors to include in neighbourhood.
+        nnear_mult: int
+            Number multiplied by nnear to increse neighbourhood search. 
+            Ensures that more of the nearby observations will be not nan. 
         max_distance: float
             Max distance for including observation in neighbourhood.
         """
@@ -81,6 +86,9 @@ class OBKrigTree:
         if full_line is False:
             x0 = x0[:, :, [int(x0.shape[2] / 2)]]
 
+        # Numnber of observations
+        n_obs = x0.shape[0]
+        
         # Calculate lengths within all CMLs
         lengths_within_l = within_block_l(x0)
 
@@ -104,30 +112,75 @@ class OBKrigTree:
         np.fill_diagonal(cov_mat, nugget)
 
         # Create Kriging matrix
-        mat = np.zeros([cov_mat.shape[0] + 1, cov_mat.shape[1] + 1])
-        mat[: cov_mat.shape[0], : cov_mat.shape[1]] = cov_mat
+        mat = np.zeros([n_obs + 1, n_obs + 1])
+        mat[:n_obs, :n_obs] = cov_mat
         mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
         mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
+
+        # Points to interpolate
+        points = np.hstack([
+            ds_grid.y_grid.data.reshape(-1, 1),
+            ds_grid.x_grid.data.reshape(-1, 1),
+        ])
+        
+        # Midpoint coordinates of observations
+        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]        
+        
+        # Get neighbourhood obs for all gridpoints
+        xgrid, ygrid = points[:, 0], points[:, 1]
+        tree_neighbors = scipy.spatial.KDTree(
+            data=list(zip(x_neighbours, y_neighbours))
+        )
+        
+        distances, ixs = tree_neighbors.query(
+            list(zip(xgrid, ygrid)),
+            k=nnear*nnear_mult, # get distance to nearby links
+            distance_upper_bound=max_distance,
+        )
+        
+        # Detect observations out of range
+        out_of_range_mask = np.isinf(distances)
+        
+        # Set ot of range observations to nobs
+        ixs[out_of_range_mask] = n_obs
+                
+        # Vectorized difference estimate
+        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
+        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        delta_y = x0[:, 0, :] - y_reshaped
+        delta_x = x0[:, 1, :] - x_reshaped
+        lengths = np.sqrt(delta_x**2 + delta_y**2)
+
+        # Estimate expected variance for all links
+        var_line_point = variogram(lengths).mean(axis = 2)      
+        
 
         # Store data to self
         self.mat = mat
         self.x0 = x0
         self.var_within = np.diag(var_within)
         self.n_obs = self.var_within.size
+        self.var_line_point = var_line_point
+        self.ixs = ixs
         self.variogram = variogram
         self.nnear = nnear
         self.max_distance = max_distance
-    
-    def __call__(self, points, obs):
+        self.points = points
+        self.xgrid = ds_grid.x_grid.data.astype(float)
+        self.ygrid = ds_grid.y_grid.data.astype(float)
+        
+    def __call__(self, obs, sigma):
         """ Construct kriging matrices and block geometry.
 
         Parameters
         ----------
-        points: numpy.array
-            2D array containing the coordaintes as [y x]. 
         obs: numpy.array
             1D array containing cml and gauge observations in the correct
             order. 
+        sigma: numpy array
+            1D array containing the uncertainty associated with the cml and 
+            rain gauge observations.
 
         Returns
         -------
@@ -135,76 +188,52 @@ class OBKrigTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-
+        
+        # Add observation uncertainty to kriging matrix
+        mat = self.mat.copy()
+        diagonal = np.diag(mat).copy()
+        diagonal[:-1] = diagonal[:-1] + sigma
+        np.fill_diagonal(mat, diagonal)
+        
+        # Indices from nearest neighbour
+        ixs = self.ixs.copy()
+        
         # Ignore obs with nan
-        keep_obs = ~np.isnan(obs)
-        obs = obs[keep_obs]
+        flagged_indices = np.where(np.isnan(obs))[0]
         
-        # Coordinates of neighbour
-        x_neighbours = self.x0[keep_obs, 0, int(self.x0.shape[2] / 2)]
-        y_neighbours = self.x0[keep_obs, 1, int(self.x0.shape[2] / 2)]
+        # Set ixs where obs is flagged equal to n_obs
+        ixs[np.isin(ixs, flagged_indices)] = self.n_obs
         
-        # Return zero if no observations
-        if x_neighbours.size == 0:
-            return np.zeros(points.shape[0])
-
-        # Get neighbourhood, links represented by midpoint
-        xgrid, ygrid = points[:, 0], points[:, 1]
-        tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours))
-        )
-        distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid)),
-            k=self.x0.shape[0], # get all nearby, strip later
-            distance_upper_bound=self.max_distance,
-        )
+        # Ignore cells with no nearby observations
+        mask = (ixs == self.n_obs).all(axis=1)
+        ixs = ixs[~mask]
+        var_line_point = self.var_line_point[~mask]
         
-        # Vectorized difference estimate
-        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
-        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
-        delta_y = self.x0[keep_obs, 0, :] - y_reshaped
-        delta_x = self.x0[keep_obs, 1, :] - x_reshaped
-        lengths = np.sqrt(delta_x**2 + delta_y**2)
-
-        # Estimate expected variance for all links
-        var_line_point = self.variogram(lengths).mean(axis = 2)
-        
-        # Number of not nan observations
-        n_obs = keep_obs.sum()
-        
-        # Mask for tracking cells to ignore
-        mask = (ixs == n_obs).all(axis=1)
-
-        rain = np.full_like(xgrid, 0)
-
-        # Gridpoints to use
-        xgrid_t, ygrid_t, ixs = xgrid[~mask], ygrid[~mask], ixs[~mask]
-
         # array for storing CML-radar merge
-        estimate = np.zeros(xgrid_t.size)
+        estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
-        for i in range(xgrid_t.size):
-            # Kdtree sets missing neighbours to len(observations),
-            ind = ixs[i][ixs[i] < n_obs][:self.nnear]
-
-
-            # Append the non-bias indices to krigin matrix lookup
-            i_mat = np.append(ind, self.n_obs) # n_obs is the last element
-            
-            # Subtract withinblock covariance of the blocks
+        for i in range(ixs.shape[0]):
+            # Remove indices equal to n_obs, select the first nnear.
+            ind = ixs[i][ixs[i] < self.n_obs][:self.nnear]
+                                    
+            # Subtract withinblock covariance of the blocks.
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
             # Add non bias condition
             target = np.append(target, 1)
             
+            # Append the non-bias indices to krigin matrix lookup
+            i_mat = np.append(ind, self.n_obs)
+            
             # Solve the kriging system
-            w = np.linalg.solve(self.mat[np.ix_(i_mat, i_mat)], target)[:-1]
+            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-1]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
         
         # Return dataset with interpolated values
+        rain = np.full_like(self.xgrid.ravel(), 0)
         rain[~mask] = estimate
         return rain
 
