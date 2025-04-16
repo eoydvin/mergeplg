@@ -158,17 +158,12 @@ class OBKrigTree:
 
         # Store data to self
         self.mat = mat
-        self.x0 = x0
         self.var_within = np.diag(var_within)
         self.n_obs = self.var_within.size
         self.var_line_point = var_line_point
         self.ixs = ixs
-        self.variogram = variogram
         self.nnear = nnear
-        self.max_distance = max_distance
-        self.points = points
         self.xgrid = ds_grid.x_grid.data.astype(float)
-        self.ygrid = ds_grid.y_grid.data.astype(float)
         
     def __call__(self, obs, sigma):
         """ Construct kriging matrices and block geometry.

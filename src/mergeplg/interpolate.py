@@ -188,11 +188,11 @@ class InterpolateIDW(Interpolator):
     
     def _get_obs(self, ds_cmls=None, ds_gauges=None):
         if ds_gauges is not None:
-            obs_gauges = ds_gauges.R.data.ravel()
+            obs_gauges = ds_gauges.data.ravel()
         else:
             obs_gauges = []
         if ds_cmls is not None:
-            obs_cmls = ds_cmls.R.data.ravel()
+            obs_cmls = ds_cmls.data.ravel()
         else:
             obs_cmls = []
         
@@ -272,7 +272,7 @@ class InterpolateOrdinaryKriging(Interpolator):
         self,
         ds_grid,
         ds_cmls=None,
-        ds_gauges=None,        
+        ds_gauges=None,      
         variogram_model="spherical",
         variogram_parameters=None,
         discretization=8,
@@ -341,12 +341,17 @@ class InterpolateOrdinaryKriging(Interpolator):
             full_line=self.full_line,
         )
     
-    def _get_obs_sigma(self, ds_cmls=None, ds_gauges=None):
+    def _get_obs_sigma(
+        self, 
+        ds_cmls=None, 
+        ds_gauges=None, 
+        ds_cmls_sigma=None, 
+        ds_gauges_sigma=None
+    ):
         if ds_gauges is not None:
-            obs_gauges = ds_gauges.R.data.ravel()
-            # check if sigma is present
-            if 'sigma_R' in ds_gauges:
-                sigma_gauges = ds_gauges.sigma_R.data.ravel()
+            obs_gauges = ds_gauges.data.ravel()
+            if ds_gauges_sigma is not None:
+                sigma_gauges = ds_gauges_sigma.data.ravel()
             else:
                 sigma_gauges = np.zeros(obs_gauges.size)     
         else:
@@ -354,20 +359,29 @@ class InterpolateOrdinaryKriging(Interpolator):
             sigma_gauges = []
             
         if ds_cmls is not None:
-            obs_cmls = ds_cmls.R.data.ravel()
-            
-            # check if sigma is present
-            if 'sigma_R' in ds_cmls:
-                sigma_cmls = ds_cmls.sigma_R.data.ravel()
+            obs_cmls = ds_cmls.data.ravel()
+            if ds_cmls_sigma is not None:
+                sigma_cmls = ds_cmls_sigma.data.ravel()
             else:
                 sigma_cmls = np.zeros(obs_cmls.size)              
         else:
             obs_cmls = []
             sigma_cmls = []
         
-        return np.concatenate([obs_cmls, obs_gauges]), np.concatenate([sigma_cmls, sigma_gauges])
-    
-    def __call__(self, ds_grid, ds_cmls=None, ds_gauges=None):
+        # Stack observations and sigma in the order expected by interpolator
+        obs = np.concatenate([obs_cmls, obs_gauges])
+        sigma = np.concatenate([sigma_cmls, sigma_gauges])
+ 
+        return obs, sigma
+
+    def __call__(
+            self, 
+            ds_grid, 
+            ds_cmls=None, 
+            ds_gauges=None,
+            ds_cmls_sigma=None,
+            ds_gauges_sigma=None,
+            ):
 
         """Interpolate observations for one time step.
 
@@ -384,6 +398,12 @@ class InterpolateOrdinaryKriging(Interpolator):
         ds_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
+        ds_cmls_sigma: xarray.DataAarray
+            CML uncertainties correpsonding to the data in ds_cmls. If set to 
+            None, sigma is set to zero. Adds to the variogram nugget.
+        ds_gauges_sigma: xarray.DataArray
+            Gauge uncertainties correpsonding to the data in ds_gauges. If set to 
+            None, sigma is set to zero. Adds to the variogram nugget.
 
         Returns
         -------
@@ -396,8 +416,8 @@ class InterpolateOrdinaryKriging(Interpolator):
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(ds_grid, ds_cmls, ds_gauges)
 
-        # Get correct order of observations and their uncertainty
-        obs, sigma = self._get_obs_sigma(ds_cmls, ds_gauges)
+        # Get correct order of observations and sigma (if sigma is present)
+        obs, sigma = self._get_obs_sigma(ds_cmls, ds_gauges, ds_cmls_sigma, ds_gauges_sigma)
         
         # If few observations return grid of nans
         if (~np.isnan(obs)).sum() <= self.min_observations:
