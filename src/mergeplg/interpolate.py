@@ -160,8 +160,6 @@ class InterpolateIDW(Interpolator):
         self.nnear=nnear
         self.max_distance=max_distance
         
-        
-
     def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
         # Get CML and gauge coordinates if present
         if ds_cmls is not None:
@@ -186,33 +184,33 @@ class InterpolateIDW(Interpolator):
         return idw.Invdisttree(yx)        
     
     
-    def _get_obs(self, ds_cmls=None, ds_gauges=None):
-        if ds_gauges is not None:
-            obs_gauges = ds_gauges.data.ravel()
+    def _get_obs(self, da_cmls=None, da_gauges=None):
+        if da_gauges is not None:
+            obs_gauges = da_gauges.data.ravel()
         else:
             obs_gauges = []
-        if ds_cmls is not None:
-            obs_cmls = ds_cmls.data.ravel()
+        if da_cmls is not None:
+            obs_cmls = da_cmls.data.ravel()
         else:
             obs_cmls = []
         
         return np.concatenate([obs_cmls, obs_gauges])
             
-    def __call__(self, ds_grid, ds_cmls=None, ds_gauges=None):
+    def __call__(self, da_grid, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
 
         Interpolate observations for one time step. 
 
         Parameters
         ----------
-        ds_grid: xarray.Dataset
-            Dataset providing the grid for interpolation. Must contain
+        da_grid: xarray.DataArray
+            Dataarray providing the grid for interpolation. Must contain
             projected x_grid and y_grid coordinates.
-        ds_cmls: xarray.Dataset
+        da_cmls: xarray.Dataset
             CML observations. Must contain the projected midpoint
             coordinates (x, y) as well as the rainfall measurements stored 
             under variable name 'R'.
-        ds_gauges: xarray.Dataset
+        da_gauges: xarray.Dataset
             Gauge observations. Must contain the coordinates projected
             coordinates (x, y) as well as the rainfall measurements stored 
             under variable name 'R'.
@@ -224,22 +222,22 @@ class InterpolateIDW(Interpolator):
             interpolated field.
         """        
         # Get updated interpolator object
-        self._interpolator = self._maybe_update_interpolator(ds_grid, ds_cmls, ds_gauges)
+        self._interpolator = self._maybe_update_interpolator(da_grid, da_cmls, da_gauges)
 
         # Get correct order of observations
-        observations = self._get_obs(ds_cmls, ds_gauges)
+        observations = self._get_obs(da_cmls, da_gauges)
         
         # Grid specific information
         coord_pred = np.hstack(
-            [ds_grid.y_grid.data.reshape(-1, 1), ds_grid.x_grid.data.reshape(-1, 1)]
+            [da_grid.y_grid.data.reshape(-1, 1), da_grid.x_grid.data.reshape(-1, 1)]
         )
         
         # If few observations return zero grid
         if (~np.isnan(observations)).sum() <= self.min_observations:
             return xr.DataArray(
-                data=np.full_like(self.ds_grid.x_grid, np.nan),
-                coords=self.ds_grid.coords,
-                dims=self.ds_grid.dims,
+                data=np.full_like(da_grid.x_grid, np.nan),
+                coords=da_grid.coords,
+                dims=da_grid.dims,
             )
         
         # IDW interpolator invdisttree
@@ -250,10 +248,10 @@ class InterpolateIDW(Interpolator):
             p=self.p,
             idw_method=self.idw_method,
             max_distance=self.max_distance,
-        ).reshape(ds_grid.x_grid.shape)
+        ).reshape(da_grid.x_grid.shape)
         
         da_interpolated = xr.DataArray(
-            data=interpolated, coords=ds_grid.coords, dims=ds_grid.dims
+            data=interpolated, coords=da_grid.coords, dims=da_grid.dims
         )
         
         return da_interpolated
@@ -343,25 +341,25 @@ class InterpolateOrdinaryKriging(Interpolator):
     
     def _get_obs_sigma(
         self, 
-        ds_cmls=None, 
-        ds_gauges=None, 
-        ds_cmls_sigma=None, 
-        ds_gauges_sigma=None
+        da_cmls=None, 
+        da_gauges=None, 
+        da_cmls_sigma=None, 
+        da_gauges_sigma=None
     ):
-        if ds_gauges is not None:
-            obs_gauges = ds_gauges.data.ravel()
-            if ds_gauges_sigma is not None:
-                sigma_gauges = ds_gauges_sigma.data.ravel()
+        if da_gauges is not None:
+            obs_gauges = da_gauges.data.ravel()
+            if da_gauges_sigma is not None:
+                sigma_gauges = da_gauges_sigma.data.ravel()
             else:
                 sigma_gauges = np.zeros(obs_gauges.size)     
         else:
             obs_gauges = []
             sigma_gauges = []
             
-        if ds_cmls is not None:
-            obs_cmls = ds_cmls.data.ravel()
-            if ds_cmls_sigma is not None:
-                sigma_cmls = ds_cmls_sigma.data.ravel()
+        if da_cmls is not None:
+            obs_cmls = da_cmls.data.ravel()
+            if da_cmls_sigma is not None:
+                sigma_cmls = da_cmls_sigma.data.ravel()
             else:
                 sigma_cmls = np.zeros(obs_cmls.size)              
         else:
@@ -376,11 +374,11 @@ class InterpolateOrdinaryKriging(Interpolator):
 
     def __call__(
             self, 
-            ds_grid, 
-            ds_cmls=None, 
-            ds_gauges=None,
-            ds_cmls_sigma=None,
-            ds_gauges_sigma=None,
+            da_grid, 
+            da_cmls=None, 
+            da_gauges=None,
+            da_cmls_sigma=None,
+            da_gauges_sigma=None,
             ):
 
         """Interpolate observations for one time step.
@@ -390,18 +388,18 @@ class InterpolateOrdinaryKriging(Interpolator):
         Parameters
         ----------
         da_grid: xarray.DataArray
-            Dataframe providing the grid for interpolation. Must contain
+            Dataarray providing the grid for interpolation. Must contain
             projected x_grid and y_grid coordinates.
-        ds_cmls: xarray.DataArray
+        da_cmls: xarray.DataArray
             CML observations. Must contain the projected coordinates (site_0_x, 
             site_1_x, site_0_y, site_1_y).
-        ds_gauges: xarray.DataArray
+        da_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        ds_cmls_sigma: xarray.DataAarray
+        da_cmls_sigma: xarray.DataAarray
             CML uncertainties correpsonding to the data in ds_cmls. If set to 
             None, sigma is set to zero. Adds to the variogram nugget.
-        ds_gauges_sigma: xarray.DataArray
+        da_gauges_sigma: xarray.DataArray
             Gauge uncertainties correpsonding to the data in ds_gauges. If set to 
             None, sigma is set to zero. Adds to the variogram nugget.
 
@@ -414,24 +412,24 @@ class InterpolateOrdinaryKriging(Interpolator):
         
         
         # Get updated interpolator object
-        self._interpolator = self._maybe_update_interpolator(ds_grid, ds_cmls, ds_gauges)
+        self._interpolator = self._maybe_update_interpolator(da_grid, da_cmls, da_gauges)
 
         # Get correct order of observations and sigma (if sigma is present)
-        obs, sigma = self._get_obs_sigma(ds_cmls, ds_gauges, ds_cmls_sigma, ds_gauges_sigma)
+        obs, sigma = self._get_obs_sigma(da_cmls, da_gauges, da_cmls_sigma, da_gauges_sigma)
         
         # If few observations return grid of nans
         if (~np.isnan(obs)).sum() <= self.min_observations:
             return xr.DataArray(
-                data=np.full_like(ds_grid.x_grid, np.nan),
-                coords=ds_grid.coords,
-                dims=ds_grid.dims,
+                data=np.full_like(da_grid.x_grid, np.nan),
+                coords=da_grid.coords,
+                dims=da_grid.dims,
             )
 
         # Neighbourhood kriging with uncertainty
-        interpolated = self._interpolator(obs, sigma).reshape(ds_grid.x_grid.shape)
+        interpolated = self._interpolator(obs, sigma).reshape(da_grid.x_grid.shape)
 
         da_interpolated = xr.DataArray(
-            data=interpolated, coords=ds_grid.coords, dims=ds_grid.dims
+            data=interpolated, coords=da_grid.coords, dims=da_grid.dims
         )
 
         return da_interpolated

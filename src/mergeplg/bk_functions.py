@@ -40,6 +40,9 @@ class OBKrigTree:
         variogram: function
             A user defined function defining the variogram. Input 
             distance, returns the expected variance.
+        da_grid: xarray.DataArray
+            Dataarray providing the grid for interpolation. Must contain
+            projected x_grid and y_grid coordinates.
         ds_cmls: xarray.Dataset
             CML dataset or data array. Must contain the projected coordinates 
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
@@ -155,7 +158,6 @@ class OBKrigTree:
         # Estimate expected variance for all links
         var_line_point = variogram(lengths).mean(axis = 2)      
         
-
         # Store data to self
         self.mat = mat
         self.var_within = np.diag(var_within)
@@ -243,10 +245,12 @@ class BKEDTree:
     def __init__(
             self, 
             variogram,
+            ds_rad,
             ds_cmls=None, 
             ds_gauges=None,
             discretization=8,
             nnear=8,
+            nnear_mult=2,
             max_distance=60000,
             ):
 
@@ -260,6 +264,9 @@ class BKEDTree:
         variogram: function
             A user defined function defining the variogram. Input 
             distance, returns the expected variance.
+        ds_rad: xarray.DataArray
+            Dataarray providing the grid for interpolation. Must contain
+            projected x_grid and y_grid coordinates.
         ds_cmls: xarray.Dataset
             CML dataset or data array. Must contain the projected coordinates 
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
@@ -270,6 +277,9 @@ class BKEDTree:
             Number of intervals to discretize the CML into.
         nnear: int
             Number of neighbors to include in neighbourhood.
+        nnear_mult: int
+            Number multiplied by nnear to increse neighbourhood search. 
+            Ensures that more of the nearby observations will be not nan. 
         max_distance: float
             Max distance for including observation in neighbourhood.
         """
@@ -299,6 +309,9 @@ class BKEDTree:
                 disc=range(discretization + 1)
             ).transpose("id", "yx", "disc").data
         
+        # Numnber of observations
+        n_obs = x0.shape[0]
+        
         # Calculate lengths within all CMLs
         lengths_within_l = within_block_l(x0)
 
@@ -327,35 +340,71 @@ class BKEDTree:
         mat[-2, :-2] = np.ones(cov_mat.shape[1])  # non-bias condition
         mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
 
+        # Points to interpolate
+        points = np.hstack([
+            ds_rad.y_grid.data.reshape(-1, 1),
+            ds_rad.x_grid.data.reshape(-1, 1),
+        ])
+        
+        # Midpoint coordinates of observations
+        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]        
+        
+        # Get neighbourhood obs for all gridpoints
+        xgrid, ygrid = points[:, 0], points[:, 1]
+        tree_neighbors = scipy.spatial.KDTree(
+            data=list(zip(x_neighbours, y_neighbours))
+        )
+        
+        distances, ixs = tree_neighbors.query(
+            list(zip(xgrid, ygrid)),
+            k=nnear*nnear_mult, # get distance to nearby links
+            distance_upper_bound=max_distance,
+        )
+        
+        # Detect observations out of range
+        out_of_range_mask = np.isinf(distances)
+        
+        # Set ot of range observations to nobs
+        ixs[out_of_range_mask] = n_obs
+                
+        # Vectorized difference estimate
+        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
+        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        delta_y = x0[:, 0, :] - y_reshaped
+        delta_x = x0[:, 1, :] - x_reshaped
+        lengths = np.sqrt(delta_x**2 + delta_y**2)
+
+        # Estimate expected variance for all links
+        var_line_point = variogram(lengths).mean(axis = 2)      
+
         # Store data to self
         self.mat = mat
-        self.x0 = x0
         self.var_within = np.diag(var_within)
         self.n_obs = self.var_within.size
-        self.variogram = variogram
+        self.var_line_point = var_line_point
+        self.ixs = ixs
         self.nnear = nnear
-        self.max_distance = max_distance
-    
+        self.xgrid = ds_rad.x_grid.data.astype(float)
+
     def __call__(
-            self, 
-            points, 
-            rad_field, 
+            self,
+            rad_field,
             obs,
             rad_obs,
+            sigma,
         ):
         """ Construct kriging matrices and block geometry.
 
         Parameters
         ----------
-        points: numpy.array
-            2D array containing the coordaintes as [y x]. 
-        rad_field: numpy.array
-            1D array containing the radar observation at the coordinates
-            stored in points.
         obs: numpy.array 
             Observations as ground.
         rad_obs numpy.arrays
             Radar observations at ground.
+        sigma: numpy array
+            1D array containing the uncertainty associated with the cml and 
+            rain gauge observations.
 
         Returns
         -------
@@ -363,81 +412,62 @@ class BKEDTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-        
-        # Ignore obs with nan
-        keep_obs = ~np.isnan(obs)
-        obs = obs[keep_obs]
+
+        # Add observation uncertainty to kriging matrix
+        mat = self.mat.copy()
+        diagonal = np.diag(mat).copy()
+        diagonal[:-2] = diagonal[:-2] + sigma
+        np.fill_diagonal(mat, diagonal)
         
         # Set drift term in kriging matrix
         mat = self.mat.copy()
         mat[-1, :-2] = rad_obs  # Radar drift
         mat[:-2, -1] = rad_obs  # Radar drift
-
-        # Coordinates of neighbour
-        x_neighbours = self.x0[keep_obs, 0, int(self.x0.shape[2] / 2)]
-        y_neighbours = self.x0[keep_obs, 1, int(self.x0.shape[2] / 2)]
-
-        # Return zero if no observations
-        if x_neighbours.size == 0:
-            return np.zeros(points.shape[0])
         
-        # Get neighbourhood, links represented by midpoint
-        xgrid, ygrid = points[:, 0], points[:, 1]
-        tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours))
-        )
-        distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid)),
-            k=self.x0.shape[0], # all possible 
-            distance_upper_bound=self.max_distance,
-        )
-
-        # Vectorized difference estimate
-        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
-        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
-        delta_y = self.x0[keep_obs, 0, :] - y_reshaped
-        delta_x = self.x0[keep_obs, 1, :] - x_reshaped
-        lengths = np.sqrt(delta_x**2 + delta_y**2)
-
-        # Estimate expected variance for all links
-        var_line_point = self.variogram(lengths).mean(axis = 2)
+        # Indices from nearest neighbour
+        ixs = self.ixs.copy()
         
-        # Number of not nan observations
-        n_obs = keep_obs.sum()
+        # Ignore obs with nan
+        flagged_indices = np.where(np.isnan(obs) | np.isnan(rad_obs))[0]
         
-        # Skip radar pixels with np.nan, more than 2 observations
-        mask = np.isnan(rad_field) | ((ixs != n_obs).sum(axis=1) <= 1)
+        # Set ixs where obs is flagged equal to n_obs
+        ixs[np.isin(ixs, flagged_indices)] = self.n_obs
+        
+        # Ignore cells with less than 2 observations
+        mask = (ixs != self.n_obs).sum(axis=1) < 2
         ixs = ixs[~mask]
-        rain = np.full_like(rad_field, 0)
-
-        # Gridpoints to use
-        xgrid_t, ygrid_t = xgrid[~mask], ygrid[~mask]
-        rad_field_t = rad_field[~mask]
-
+        var_line_point = self.var_line_point[~mask]
+        rad_field = rad_field[~mask]
+        
         # array for storing CML-radar merge
-        estimate = np.zeros(xgrid_t.shape)
+        estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
-        for i in range(xgrid_t.size):
-            # Kdtree sets missing neighbours to len(observations),
-            ind = ixs[i][ixs[i] < n_obs][:self.nnear]
-            
-            # Append the non-bias and rad indices to krigin matrix lookup
-            i_mat = np.append(ind, [self.n_obs, self.n_obs+1])
-           
-            # Subtract withinblock covariance of the blocks
+        for i in range(ixs.shape[0]):
+            # Remove indices equal to n_obs, select the first nnear.
+            ind = ixs[i][ixs[i] < self.n_obs][:self.nnear]
+
+            # If all radar observations are the same
+            if (mat[-1, ind] == mat[-1, ind[0]]).all():
+                continue
+
+            # Subtract withinblock covariance of the blocks.
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
-            
-            # Add non bias condition and rad obs
+
+            # Add non bias condition
             target = np.append(target, [1, rad_field[i]])
+            
+            # Append the non-bias indices to krigin matrix lookup
+            i_mat = np.append(ind, [self.n_obs, self.n_obs+1])
 
             # Solve the kriging system
             w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
-
+        
         # Return dataset with interpolated values
+        rain = np.full_like(self.xgrid.ravel(), 0)
         rain[~mask] = estimate
         return rain
 
