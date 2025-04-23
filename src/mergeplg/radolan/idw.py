@@ -178,7 +178,7 @@ class Invdisttree:
 
         # Ignore obs with nan
         flagged_indices = np.where(np.isnan(z))[0]
-        
+
         # Set ix where obs is flagged equal to n_obs, these are ignored in loop
         ix[np.isin(ix, flagged_indices)] = len(z)
 

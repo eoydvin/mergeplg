@@ -58,7 +58,6 @@ ds_rad = xr.Dataset(
 def test_blockkriging_vs_pykrige():
     # CML and rain gauge overlapping sets
     ds_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=1)
-    ds_gauges_t1 = ds_gauges.isel(id=[2, 1], time=0)
 
     ds_grid = ds_rad.isel(time=0)
 
@@ -72,24 +71,24 @@ def test_blockkriging_vs_pykrige():
         full_line=False,
         variogram_model=variogram_model,
         variogram_parameters=variogram_parameters,
-        nnear=12,        
-        min_observations=1
+        nnear=12,
+        min_observations=1,
     )
 
     # Interpolate field
     interp_field = interpolate_krig(
         ds_grid,
-        ds_cmls=ds_cml_t1,
+        da_cmls=ds_cml_t1.R,
     )
 
-    x_mid = 0.5*(ds_cml_t1.site_0_x + ds_cml_t1.site_1_x).data
-    y_mid = 0.5*(ds_cml_t1.site_0_y + ds_cml_t1.site_1_y).data
+    x_mid = 0.5 * (ds_cml_t1.site_0_x + ds_cml_t1.site_1_x).data
+    y_mid = 0.5 * (ds_cml_t1.site_0_y + ds_cml_t1.site_1_y).data
     obs = ds_cml_t1.R.data
-    
+
     # Setup pykrige using midpoint of CMLs as reference
     ok = pykrige.OrdinaryKriging(
         x_mid.ravel(),
-        y_mid.ravel(),  
+        y_mid.ravel(),
         obs.ravel(),
         variogram_model=variogram_model,
         variogram_parameters=variogram_parameters,
@@ -106,4 +105,3 @@ def test_blockkriging_vs_pykrige():
     interp_field_pykrige = z.reshape(ds_grid.x_grid.shape)
 
     np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
-

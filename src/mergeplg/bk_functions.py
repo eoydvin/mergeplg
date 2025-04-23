@@ -6,31 +6,31 @@ Created on Fri Oct 18 20:21:53 2024
 
 import numpy as np
 import pykrige
-import xarray as xr
 import scipy
-import poligrain as plg
+import xarray as xr
+
 
 class OBKrigTree:
-    """ Ordinary block kriging interpolation using KDTree. 
+    """Ordinary block kriging interpolation using KDTree.
 
-    Interpolate CML and rain gauge data using an modified neighbourhood 
+    Interpolate CML and rain gauge data using an modified neighbourhood
     based implementation of block kriging. See Journel and Huijbregts
-    (1978) Mining Geostatistics. 
+    (1978) Mining Geostatistics.
     """
-    def __init__(
-            self, 
-            variogram,
-            ds_grid,
-            ds_cmls=None, 
-            ds_gauges=None, 
-            discretization=8,
-            nnear=8,
-            nnear_mult=2,
-            max_distance=60000,
-            full_line=True,
-            ):
 
-        """ Construct kriging matrices and block geometry.
+    def __init__(
+        self,
+        variogram,
+        ds_grid,
+        ds_cmls=None,
+        ds_gauges=None,
+        discretization=8,
+        nnear=8,
+        nnear_mult=2,
+        max_distance=60000,
+        full_line=True,
+    ):
+        """Construct kriging matrices and block geometry.
 
         Relies on xarray datasets for CML and rain gauge data following
         the OpenSense naming convention.
@@ -38,24 +38,24 @@ class OBKrigTree:
         Parameters
         ----------
         variogram: function
-            A user defined function defining the variogram. Input 
+            A user defined function defining the variogram. Input
             distance, returns the expected variance.
         da_grid: xarray.DataArray
             Dataarray providing the grid for interpolation. Must contain
             projected x_grid and y_grid coordinates.
         ds_cmls: xarray.Dataset
-            CML dataset or data array. Must contain the projected coordinates 
+            CML dataset or data array. Must contain the projected coordinates
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
         ds_gauges: xarray.Dataset
-            Gauge dataset or data array. Must contain the projected 
+            Gauge dataset or data array. Must contain the projected
             coordinates of the rain gauges (x, y).
         discretization: int
             Number of intervals to discretize the CML into.
         nnear: int
             Number of neighbors to include in neighbourhood.
         nnear_mult: int
-            Number multiplied by nnear to increse neighbourhood search. 
-            Ensures that more of the nearby observations will be not nan. 
+            Number multiplied by nnear to increase neighbourhood search.
+            Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
         """
@@ -63,11 +63,13 @@ class OBKrigTree:
             # Get structured coordinates of CML and rain gauge
             x0_cml = calculate_cml_line(ds_cmls).data
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
-            
+
             # Create block geometry for rain gauge
-            x0_gauge = x0_gauge.expand_dims(
-                disc=range(discretization + 1)
-            ).transpose("id", "yx", "disc").data
+            x0_gauge = (
+                x0_gauge.expand_dims(disc=range(discretization + 1))
+                .transpose("id", "yx", "disc")
+                .data
+            )
 
             # Store cml and gauge block geometry
             x0 = np.vstack([x0_cml, x0_gauge])
@@ -75,23 +77,25 @@ class OBKrigTree:
         elif ds_cmls is not None:
             # Get structured coordinates of CML and store
             x0 = calculate_cml_line(ds_cmls).data
-        
+
         elif ds_gauges is not None:
             # Get structured coordinates of rain gauge
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
-            
+
             # Create block geometry for rain gauge and store
-            x0 = x0_gauge.expand_dims(
-                disc=range(discretization + 1)
-            ).transpose("id", "yx", "disc").data
-       
+            x0 = (
+                x0_gauge.expand_dims(disc=range(discretization + 1))
+                .transpose("id", "yx", "disc")
+                .data
+            )
+
         # Force interpolator to use only midpoint
         if full_line is False:
             x0 = x0[:, :, [int(x0.shape[2] / 2)]]
 
-        # Numnber of observations
+        # Number of observations
         n_obs = x0.shape[0]
-        
+
         # Calculate lengths within all CMLs
         lengths_within_l = within_block_l(x0)
 
@@ -110,8 +114,10 @@ class OBKrigTree:
         # Subtract within from block and turn into covariance
         cov_mat = var_within - var_block
 
-        # Add nugget value to diagonal 
-        nugget = variogram(np.array([0.0]),)
+        # Add nugget value to diagonal
+        nugget = variogram(
+            np.array([0.0]),
+        )
         np.fill_diagonal(cov_mat, nugget)
 
         # Create Kriging matrix
@@ -121,33 +127,35 @@ class OBKrigTree:
         mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
         # Points to interpolate
-        points = np.hstack([
-            ds_grid.y_grid.data.reshape(-1, 1),
-            ds_grid.x_grid.data.reshape(-1, 1),
-        ])
-        
+        points = np.hstack(
+            [
+                ds_grid.y_grid.data.reshape(-1, 1),
+                ds_grid.x_grid.data.reshape(-1, 1),
+            ]
+        )
+
         # Midpoint coordinates of observations
         x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]        
-        
+        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+
         # Get neighbourhood obs for all gridpoints
         xgrid, ygrid = points[:, 0], points[:, 1]
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours))
+            data=list(zip(x_neighbours, y_neighbours, strict=False))
         )
-        
+
         distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid)),
-            k=nnear*nnear_mult, # get distance to nearby links
+            list(zip(xgrid, ygrid, strict=False)),
+            k=nnear * nnear_mult,  # get distance to nearby links
             distance_upper_bound=max_distance,
         )
-        
+
         # Detect observations out of range
         out_of_range_mask = np.isinf(distances)
-        
-        # Set ot of range observations to nobs
+
+        # Set out of range observations to nobs
         ixs[out_of_range_mask] = n_obs
-                
+
         # Vectorized difference estimate
         y_reshaped = points[:, 0, np.newaxis, np.newaxis]
         x_reshaped = points[:, 1, np.newaxis, np.newaxis]
@@ -156,8 +164,8 @@ class OBKrigTree:
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Estimate expected variance for all links
-        var_line_point = variogram(lengths).mean(axis = 2)      
-        
+        var_line_point = variogram(lengths).mean(axis=2)
+
         # Store data to self
         self.mat = mat
         self.var_within = np.diag(var_within)
@@ -166,17 +174,17 @@ class OBKrigTree:
         self.ixs = ixs
         self.nnear = nnear
         self.xgrid = ds_grid.x_grid.data.astype(float)
-        
+
     def __call__(self, obs, sigma):
-        """ Construct kriging matrices and block geometry.
+        """Construct kriging matrices and block geometry.
 
         Parameters
         ----------
         obs: numpy.array
             1D array containing cml and gauge observations in the correct
-            order. 
+            order.
         sigma: numpy array
-            1D array containing the uncertainty associated with the cml and 
+            1D array containing the uncertainty associated with the cml and
             rain gauge observations.
 
         Returns
@@ -185,76 +193,76 @@ class OBKrigTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-        
         # Add observation uncertainty to kriging matrix
         mat = self.mat.copy()
         diagonal = np.diag(mat).copy()
         diagonal[:-1] = diagonal[:-1] + sigma
         np.fill_diagonal(mat, diagonal)
-        
+
         # Indices from nearest neighbour
         ixs = self.ixs.copy()
-        
+
         # Ignore obs with nan
         flagged_indices = np.where(np.isnan(obs))[0]
-        
+
         # Set ixs where obs is flagged equal to n_obs
         ixs[np.isin(ixs, flagged_indices)] = self.n_obs
-        
+
         # Ignore cells with no nearby observations
         mask = (ixs == self.n_obs).all(axis=1)
         ixs = ixs[~mask]
         var_line_point = self.var_line_point[~mask]
-        
+
         # array for storing CML-radar merge
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(ixs.shape[0]):
             # Remove indices equal to n_obs, select the first nnear.
-            ind = ixs[i][ixs[i] < self.n_obs][:self.nnear]
-                                    
+            ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
+
             # Subtract withinblock covariance of the blocks.
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
             # Add non bias condition
             target = np.append(target, 1)
-            
+
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, self.n_obs)
-            
+
             # Solve the kriging system
             w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-1]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
-        
+
         # Return dataset with interpolated values
         rain = np.full_like(self.xgrid.ravel(), 0)
         rain[~mask] = estimate
         return rain
 
+
 class BKEDTree:
-    """ Block kriging with external drift merging using KDTree. 
+    """Block kriging with external drift merging using KDTree.
 
-    Merge radar and CML and rain gauge data using an modified 
-    neighbourhood based implementation of block kriging with 
-    external drift. See Journel and Huijbregts (1978) 
-    Mining Geostatistics. 
+    Merge radar and CML and rain gauge data using an modified
+    neighbourhood based implementation of block kriging with
+    external drift. See Journel and Huijbregts (1978)
+    Mining Geostatistics.
     """
-    def __init__(
-            self, 
-            variogram,
-            ds_rad,
-            ds_cmls=None, 
-            ds_gauges=None,
-            discretization=8,
-            nnear=8,
-            nnear_mult=2,
-            max_distance=60000,
-            ):
 
-        """ Construct kriging matrices and block geometry.
+    def __init__(
+        self,
+        variogram,
+        ds_rad,
+        ds_cmls=None,
+        ds_gauges=None,
+        discretization=8,
+        nnear=8,
+        nnear_mult=2,
+        max_distance=60000,
+    ):
+        """Construct kriging matrices and block geometry.
 
         Relies on xarray datasets for CML and rain gauge data following
         the OpenSense naming convention.
@@ -262,24 +270,24 @@ class BKEDTree:
         Parameters
         ----------
         variogram: function
-            A user defined function defining the variogram. Input 
+            A user defined function defining the variogram. Input
             distance, returns the expected variance.
         ds_rad: xarray.DataArray
             Dataarray providing the grid for interpolation. Must contain
             projected x_grid and y_grid coordinates.
         ds_cmls: xarray.Dataset
-            CML dataset or data array. Must contain the projected coordinates 
+            CML dataset or data array. Must contain the projected coordinates
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
         ds_gauges: xarray.Dataset
-            Gauge dataset or data array. Must contain the projected 
+            Gauge dataset or data array. Must contain the projected
             coordinates of the rain gauges (x, y).
         discretization: int
             Number of intervals to discretize the CML into.
         nnear: int
             Number of neighbors to include in neighbourhood.
         nnear_mult: int
-            Number multiplied by nnear to increse neighbourhood search. 
-            Ensures that more of the nearby observations will be not nan. 
+            Number multiplied by nnear to increase neighbourhood search.
+            Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
         """
@@ -287,31 +295,35 @@ class BKEDTree:
             # Get structured coordinates of CML and rain gauge
             x0_cml = calculate_cml_line(ds_cmls).data
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
-            
+
             # Create block geometry for rain gauge
-            x0_gauge = x0_gauge.expand_dims(
-                disc=range(discretization + 1)
-            ).transpose("id", "yx", "disc").data
+            x0_gauge = (
+                x0_gauge.expand_dims(disc=range(discretization + 1))
+                .transpose("id", "yx", "disc")
+                .data
+            )
 
             # Store cml and gauge block geometry
             x0 = np.vstack([x0_cml, x0_gauge])
 
-        elif (ds_cmls is not None):
+        elif ds_cmls is not None:
             # Get structured coordinates of CML and store
             x0 = calculate_cml_line(ds_cmls).data
-            
-        elif (ds_gauges is not None):
+
+        else:
             # Get structured coordinates of rain gauge
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
-            
+
             # Create block geometry for rain gauge and store
-            x0 = x0_gauge.expand_dims(
-                disc=range(discretization + 1)
-            ).transpose("id", "yx", "disc").data
-        
-        # Numnber of observations
+            x0 = (
+                x0_gauge.expand_dims(disc=range(discretization + 1))
+                .transpose("id", "yx", "disc")
+                .data
+            )
+
+        # Number of observations
         n_obs = x0.shape[0]
-        
+
         # Calculate lengths within all CMLs
         lengths_within_l = within_block_l(x0)
 
@@ -330,8 +342,10 @@ class BKEDTree:
         # Subtract within from block and turn into covariance
         cov_mat = var_within - var_block
 
-        # Add nugget value to diagonal 
-        nugget = variogram(np.array([0.0]),)
+        # Add nugget value to diagonal
+        nugget = variogram(
+            np.array([0.0]),
+        )
         np.fill_diagonal(cov_mat, nugget)
 
         # Create Kriging matrix
@@ -341,33 +355,35 @@ class BKEDTree:
         mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
 
         # Points to interpolate
-        points = np.hstack([
-            ds_rad.y_grid.data.reshape(-1, 1),
-            ds_rad.x_grid.data.reshape(-1, 1),
-        ])
-        
+        points = np.hstack(
+            [
+                ds_rad.y_grid.data.reshape(-1, 1),
+                ds_rad.x_grid.data.reshape(-1, 1),
+            ]
+        )
+
         # Midpoint coordinates of observations
         x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]        
-        
+        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+
         # Get neighbourhood obs for all gridpoints
         xgrid, ygrid = points[:, 0], points[:, 1]
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours))
+            data=list(zip(x_neighbours, y_neighbours, strict=False))
         )
-        
+
         distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid)),
-            k=nnear*nnear_mult, # get distance to nearby links
+            list(zip(xgrid, ygrid, strict=False)),
+            k=nnear * nnear_mult,  # get distance to nearby links
             distance_upper_bound=max_distance,
         )
-        
+
         # Detect observations out of range
         out_of_range_mask = np.isinf(distances)
-        
-        # Set ot of range observations to nobs
+
+        # Set out of range observations to nobs
         ixs[out_of_range_mask] = n_obs
-                
+
         # Vectorized difference estimate
         y_reshaped = points[:, 0, np.newaxis, np.newaxis]
         x_reshaped = points[:, 1, np.newaxis, np.newaxis]
@@ -376,7 +392,7 @@ class BKEDTree:
         lengths = np.sqrt(delta_x**2 + delta_y**2)
 
         # Estimate expected variance for all links
-        var_line_point = variogram(lengths).mean(axis = 2)      
+        var_line_point = variogram(lengths).mean(axis=2)
 
         # Store data to self
         self.mat = mat
@@ -388,22 +404,22 @@ class BKEDTree:
         self.xgrid = ds_rad.x_grid.data.astype(float)
 
     def __call__(
-            self,
-            rad_field,
-            obs,
-            rad_obs,
-            sigma,
-        ):
-        """ Construct kriging matrices and block geometry.
+        self,
+        rad_field,
+        obs,
+        rad_obs,
+        sigma,
+    ):
+        """Construct kriging matrices and block geometry.
 
         Parameters
         ----------
-        obs: numpy.array 
+        obs: numpy.array
             Observations as ground.
         rad_obs numpy.arrays
             Radar observations at ground.
         sigma: numpy array
-            1D array containing the uncertainty associated with the cml and 
+            1D array containing the uncertainty associated with the cml and
             rain gauge observations.
 
         Returns
@@ -412,40 +428,39 @@ class BKEDTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-
         # Add observation uncertainty to kriging matrix
         mat = self.mat.copy()
         diagonal = np.diag(mat).copy()
         diagonal[:-2] = diagonal[:-2] + sigma
         np.fill_diagonal(mat, diagonal)
-        
+
         # Set drift term in kriging matrix
         mat = self.mat.copy()
         mat[-1, :-2] = rad_obs  # Radar drift
         mat[:-2, -1] = rad_obs  # Radar drift
-        
+
         # Indices from nearest neighbour
         ixs = self.ixs.copy()
-        
+
         # Ignore obs with nan
         flagged_indices = np.where(np.isnan(obs) | np.isnan(rad_obs))[0]
-        
+
         # Set ixs where obs is flagged equal to n_obs
         ixs[np.isin(ixs, flagged_indices)] = self.n_obs
-        
+
         # Ignore cells with less than 2 observations
         mask = (ixs != self.n_obs).sum(axis=1) < 2
         ixs = ixs[~mask]
         var_line_point = self.var_line_point[~mask]
         rad_field = rad_field[~mask]
-        
+
         # array for storing CML-radar merge
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(ixs.shape[0]):
             # Remove indices equal to n_obs, select the first nnear.
-            ind = ixs[i][ixs[i] < self.n_obs][:self.nnear]
+            ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
 
             # If all radar observations are the same
             if (mat[-1, ind] == mat[-1, ind[0]]).all():
@@ -456,20 +471,21 @@ class BKEDTree:
 
             # Add non bias condition
             target = np.append(target, [1, rad_field[i]])
-            
+
             # Append the non-bias indices to krigin matrix lookup
-            i_mat = np.append(ind, [self.n_obs, self.n_obs+1])
+            i_mat = np.append(ind, [self.n_obs, self.n_obs + 1])
 
             # Solve the kriging system
             w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
-        
+
         # Return dataset with interpolated values
         rain = np.full_like(self.xgrid.ravel(), 0)
         rain[~mask] = estimate
         return rain
+
 
 def within_block_l(x0):
     """Calculate the lengths within all CMLs.
@@ -603,6 +619,7 @@ def construct_variogram(
 
     return variogram
 
+
 # Functions for setting up x0 for gauges and CMLs
 def calculate_cml_line(ds_cmls, discretization=8):
     """Calculate the position of points along CMLs.
@@ -724,7 +741,7 @@ def calculate_gauge_midpoint(da_gauge):
             da_gauge.x.data.reshape(-1, 1),
         ]
     )
-    
+
     # Create dataarray return
     return xr.DataArray(
         x0_gauge,

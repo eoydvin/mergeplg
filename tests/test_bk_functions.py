@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-import mergeplg
 from mergeplg import bk_functions
 
 ds_cmls = xr.Dataset(
@@ -57,7 +56,7 @@ ds_rad = xr.Dataset(
 
 def test_calculate_cml_line():
     # Test that the CML geometry is correctly esimtated
-    y, x = mergeplg.base.calculate_cml_line(
+    y, x = bk_functions.calculate_cml_line(
         ds_cmls.isel(cml_id=[1]),
         discretization=2,  # divides the line into two intervals, 3 points
     ).data[0]
@@ -68,7 +67,7 @@ def test_calculate_cml_line():
 def test_block_points_to_lengths():
     # Check that the length matrix is correctly estimated
     line = bk_functions.block_points_to_lengths(
-        mergeplg.base.calculate_cml_line(
+        bk_functions.calculate_cml_line(
             ds_cmls.isel(cml_id=[0, 1]), discretization=2
         ).data
     )
