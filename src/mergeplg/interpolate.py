@@ -18,7 +18,7 @@ class Interpolator:
     """
 
     def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
-        # Needs to return the interpolator
+        # Returns the interpolator, see for instance InterpolateIDW
         raise NotImplementedError()
 
     def __init__(self):
@@ -94,7 +94,7 @@ class Interpolator:
             self.y_1_cml = None
             cmls_equal = None
 
-        # Update interpolator if needed
+        # Construct if coordinates changed, else return existing  _interpolator
         if (ds_gauges is not None) and (ds_cmls is not None):
             if (not cmls_equal) or (not gauges_equal):  # CMLS or gauges changed
                 interpolator = self._init_interpolator(ds_grid, ds_cmls, ds_gauges)
@@ -168,7 +168,7 @@ class InterpolateIDW(Interpolator):
             ds_grid, ds_cmls, ds_gauges
         )
 
-        # Store interpolation variables
+        # Store IDW specific variables
         self.min_observations = min_observations
         self.p = p
         self.idw_method = idw_method
@@ -199,6 +199,7 @@ class InterpolateIDW(Interpolator):
         return idw.Invdisttree(yx)
 
     def _get_obs(self, da_cmls=None, da_gauges=None):
+        # Get CML and rain gauge observations as np.array
         obs_cmls = da_cmls.data.ravel() if da_cmls is not None else []
         obs_gauges = da_gauges.data.ravel() if da_gauges is not None else []
 
@@ -214,20 +215,18 @@ class InterpolateIDW(Interpolator):
         da_grid: xarray.DataArray
             Dataarray providing the grid for interpolation. Must contain
             projected x_grid and y_grid coordinates.
-        da_cmls: xarray.Dataset
-            CML observations. Must contain the projected midpoint
-            coordinates (x, y) as well as the rainfall measurements stored
-            under variable name 'R'.
-        da_gauges: xarray.Dataset
-            Gauge observations. Must contain the coordinates projected
-            coordinates (x, y) as well as the rainfall measurements stored
-            under variable name 'R'.
+        da_cmls: xarray.DataArray
+            CML observations. Must contain the rainfall observations and
+            the projected midpoint coordinates (x, y).
+        da_gauges: xarray.DataArray
+            Gauge observations. Must contain the rainfall observations and
+            the projected coordinates (x, y).
 
         Returns
         -------
         da_field_out: xarray.DataArray
-            DataArray with the same coordinates as ds_rad but with the
-            interpolated field.
+            DataArray with the interpolated field and the same coordinates
+            as ds_rad.
         """
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(
@@ -250,7 +249,7 @@ class InterpolateIDW(Interpolator):
                 dims=da_grid.dims,
             )
 
-        # IDW interpolator invdisttree
+        # IDW interpolator
         interpolated = self._interpolator(
             q=coord_pred,
             z=observations,
@@ -264,10 +263,10 @@ class InterpolateIDW(Interpolator):
 
 
 class InterpolateKriging(Interpolator):
-    """Kriging interpolator for Ordinary Kriging and KED
+    """Shared kriging functions for Ordinary Kriging and KED (see merging class)
 
     Constructs the variogram and function for returning observations
-    and sigma (uncertainties). Base class for Ordinary Kriging and KED.
+    and sigma (uncertainties). Used for Ordinary Kriging and KED.
     """
 
     def __init__(
@@ -334,7 +333,7 @@ class InterpolateKriging(Interpolator):
         )
 
     def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
-        # Needs to return the interpolator
+        # Returns the interpolator, see for instance InterpolateOrdinaryKriging
         raise NotImplementedError()
 
     def _get_obs_sigma(
@@ -368,16 +367,16 @@ class InterpolateKriging(Interpolator):
 
 
 class InterpolateOrdinaryKriging(InterpolateKriging):
-    """Interpolate data using Ordinary Kriging
+    """Interpolate CML and rain gauge data using Ordinary Kriging
 
     Interpolates the provided CML and rain gauge observations using
-    ordinary kriging. The class defaults to interpolation using neighbouring
-    observations. It also by default uses the full line geometry for
-    interpolation, but can treat the lines as points by setting full_line
-    to False.
+    ordinary kriging. Currently only neighbourhood kriging is implemented.
+    It  by default uses the full line geometry for interpolation,
+    but can treat the lines as points by setting full_line to False.
     """
 
     def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
+        # Construct OK interpolator
         return bk_functions.OBKrigTree(
             self.variogram,
             ds_grid=ds_grid,
@@ -443,7 +442,7 @@ class InterpolateOrdinaryKriging(InterpolateKriging):
                 dims=da_grid.dims,
             )
 
-        # Neighbourhood kriging with uncertainty
+        # Interpolate
         interpolated = self._interpolator(obs, sigma).reshape(da_grid.x_grid.shape)
 
         return xr.DataArray(data=interpolated, coords=da_grid.coords, dims=da_grid.dims)

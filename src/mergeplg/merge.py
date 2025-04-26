@@ -10,10 +10,10 @@ from mergeplg import bk_functions, interpolate
 
 
 class MergeBase:
-    """Base class.
+    """Base class for merging
 
-    Base class providing functions for recalculating weights used to get CML and
-    rain gauge observations.
+    Base class providing functions for retrieving radar observations
+    at CMLs and gauges
     """
 
     def __init__(self):
@@ -58,8 +58,8 @@ class MergeBase:
         """Update grid weights for CML and gauge
 
         Constructs the CML intersect weights, for retrieving rainfall rates along
-        gridded data. Also constructs function used for getting rainfall rates
-        from rain gauges.
+        gridded data. Already calculated weights are reued. Also constructs
+        function used for getting rainfall rates from rain gauges.
 
         Parameters
         ----------
@@ -181,7 +181,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
     Merges the provided radar field in ds_rad with gauge or CML observations
     by interpolating the difference (additive or multiplicative)
-    between the ground and radar observations using IDW.
+    between the ground and radar observations using IDW as interpolator.
     """
 
     def __init__(
@@ -301,7 +301,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             [da_rad.y_grid.data.reshape(-1, 1), da_rad.x_grid.data.reshape(-1, 1)]
         )
 
-        # IDW interpolator invdisttree
+        # Interpolate difference
         interpolated = self._interpolator(
             q=coord_pred,
             z=diff,
@@ -332,10 +332,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
     Merges the provided radar field in ds_rad with gauge or CML observations
     by interpolating the difference (additive or multiplicative)
     between the ground and radar observations using ordinary kriging. The class
-    defaults to interpolation using neighbouring observations, but it can
-    also consider all observations by setting n_closest to False. It also
-    by default uses the full line geometry for interpolation, but can treat
-    the lines as points by setting full_line to False.
+    uses neighbouring observations for interpolation. It also by default uses
+    the full line geometry for interpolation, but can treat the lines as
+    points by setting full_line to False.
     """
 
     def __init__(
@@ -629,7 +628,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
         rad_field = da_rad.data
         rad_field[rad_field <= 0] = np.nan
 
-        # do KED merging
+        # KED merging
         adjusted = self._interpolator(
             rad_field.ravel(),
             obs,

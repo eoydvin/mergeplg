@@ -16,6 +16,10 @@ class OBKrigTree:
     Interpolate CML and rain gauge data using an modified neighbourhood
     based implementation of block kriging. See Journel and Huijbregts
     (1978) Mining Geostatistics.
+
+    Can also do Kriging for Uncertain Data (KUD) by allowing sigma for
+    for each observation in __call__. See Cecinati et. al. (2017)
+    Considering Rain Gauge Uncertainty Using Kriging for Uncertain Data.
     """
 
     def __init__(
@@ -176,7 +180,7 @@ class OBKrigTree:
         self.xgrid = ds_grid.x_grid.data.astype(float)
 
     def __call__(self, obs, sigma):
-        """Construct kriging matrices and block geometry.
+        """Interpolate obs for one timestep
 
         Parameters
         ----------
@@ -249,6 +253,10 @@ class BKEDTree:
     neighbourhood based implementation of block kriging with
     external drift. See Journel and Huijbregts (1978)
     Mining Geostatistics.
+
+    Can also do Kriging for Uncertain Data (KUD) by allowing sigma for
+    for each observation in __call__. See Cecinati et. al. (2017)
+    Considering Rain Gauge Uncertainty Using Kriging for Uncertain Data.
     """
 
     def __init__(
@@ -410,12 +418,12 @@ class BKEDTree:
         rad_obs,
         sigma,
     ):
-        """Construct kriging matrices and block geometry.
+        """Perform KED for one time step
 
         Parameters
         ----------
         obs: numpy.array
-            Observations as ground.
+            Observations at ground (CML and rain gauge).
         rad_obs numpy.arrays
             Radar observations at ground.
         sigma: numpy array
