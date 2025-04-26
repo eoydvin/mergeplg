@@ -263,14 +263,11 @@ class InterpolateIDW(Interpolator):
         return xr.DataArray(data=interpolated, coords=da_grid.coords, dims=da_grid.dims)
 
 
-class InterpolateOrdinaryKriging(Interpolator):
-    """Interpolate CML and rain gauge using neighbourhood ordinary kriging
+class InterpolateKriging(Interpolator):
+    """Kriging interpolator for Ordinary Kriging and KED
 
-    Interpolates the provided CML and rain gauge observations using
-    ordinary kriging. The class defaults to interpolation using neighbouring
-    observations. It also by default uses the full line geometry for
-    interpolation, but can treat the lines as points by setting full_line
-    to False.
+    Constructs the variogram and function for returning observations
+    and sigma (uncertainties). Base class for Ordinary Kriging and KED.
     """
 
     def __init__(
@@ -337,16 +334,8 @@ class InterpolateOrdinaryKriging(Interpolator):
         )
 
     def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
-        return bk_functions.OBKrigTree(
-            self.variogram,
-            ds_grid=ds_grid,
-            ds_cmls=ds_cmls,
-            ds_gauges=ds_gauges,
-            discretization=self.discretization,
-            nnear=self.nnear,
-            max_distance=self.max_distance,
-            full_line=self.full_line,
-        )
+        # Needs to return the interpolator
+        raise NotImplementedError()
 
     def _get_obs_sigma(
         self, da_cmls=None, da_gauges=None, da_cmls_sigma=None, da_gauges_sigma=None
@@ -376,6 +365,29 @@ class InterpolateOrdinaryKriging(Interpolator):
         sigma = np.concatenate([sigma_cmls, sigma_gauges]).astype(float)
 
         return obs, sigma
+
+
+class InterpolateOrdinaryKriging(InterpolateKriging):
+    """Interpolate data using Ordinary Kriging
+
+    Interpolates the provided CML and rain gauge observations using
+    ordinary kriging. The class defaults to interpolation using neighbouring
+    observations. It also by default uses the full line geometry for
+    interpolation, but can treat the lines as points by setting full_line
+    to False.
+    """
+
+    def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
+        return bk_functions.OBKrigTree(
+            self.variogram,
+            ds_grid=ds_grid,
+            ds_cmls=ds_cmls,
+            ds_gauges=ds_gauges,
+            discretization=self.discretization,
+            full_line=self.full_line,
+            nnear=self.nnear,
+            max_distance=self.max_distance,
+        )
 
     def __call__(
         self,
