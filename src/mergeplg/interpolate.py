@@ -50,7 +50,7 @@ class Interpolator:
             Initialized interpolator function.
 
         """
-        if ds_gauges is not None:
+        if (ds_gauges is not None) and (ds_gauges.id.size > 0):
             # Check if coordinates are the same
             x_gauge = ds_gauges.x.data
             y_gauge = ds_gauges.y.data
@@ -68,7 +68,7 @@ class Interpolator:
             self.y_gauge = None
             gauges_equal = None
 
-        if ds_cmls is not None:
+        if (ds_cmls is not None) and (ds_cmls.cml_id.size > 0):
             # Check if coordinates are the same
             x_0_cml = ds_cmls.site_0_x.data
             x_1_cml = ds_cmls.site_1_x.data
@@ -94,20 +94,24 @@ class Interpolator:
             self.y_1_cml = None
             cmls_equal = None
 
+        # Test if CML or rain gauges is available
+        gauges_present = (ds_gauges is not None) and (gauges_equal is not None)
+        cmls_present = (ds_cmls is not None) and (cmls_equal is not None)
+
         # Construct if coordinates changed, else return existing  _interpolator
-        if (ds_gauges is not None) and (ds_cmls is not None):
+        if gauges_present and cmls_present:
             if (not cmls_equal) or (not gauges_equal):  # CMLS or gauges changed
                 interpolator = self._init_interpolator(ds_grid, ds_cmls, ds_gauges)
             else:
                 interpolator = self._interpolator
 
-        elif ds_gauges is not None:
+        elif gauges_present:
             if not gauges_equal:  # Gauges changed
                 interpolator = self._init_interpolator(ds_grid, ds_gauges=ds_gauges)
             else:
                 interpolator = self._interpolator
 
-        elif ds_cmls is not None:
+        elif cmls_present:
             if not cmls_equal:  # CMLs changed
                 interpolator = self._init_interpolator(ds_grid, ds_cmls=ds_cmls)
             else:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pykrige
+import pytest
 import xarray as xr
 
 from mergeplg import interpolate
@@ -53,6 +54,19 @@ ds_rad = xr.Dataset(
         "y_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
     },
 )
+
+
+def test_no_data():
+    # Test that providing no data raises ValueError
+    ds_cml_t1 = ds_cmls.isel(cml_id=[], time=1)
+
+    # Check that no data causes ValueError
+    msg = "Please provide CML or rain gauge data"
+    with pytest.raises(ValueError, match=msg):
+        interpolate.InterpolateOrdinaryKriging(
+            ds_grid=ds_rad,
+            ds_cmls=ds_cml_t1,
+        )
 
 
 def test_blockkriging_vs_pykrige():
