@@ -56,6 +56,38 @@ ds_rad = xr.Dataset(
 )
 
 
+def test_interpolator_update():
+    # CML and rain gauge overlapping sets
+    ds_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=1)
+    ds_cml_t1_2 = ds_cmls.isel(cml_id=[0, 1], time=1)
+    ds_grid = ds_rad.isel(time=0)
+
+    # Initialize highlevel-class
+    interpolate_krig = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cml_t1,
+    )
+
+    # Test that interpolator do not change
+    interpolator_1 = interpolate_krig._interpolator
+
+    # Interpolate field
+    interpolate_krig(
+        ds_grid,
+        da_cmls=ds_cml_t1.R,
+    )
+    interpolator_2 = interpolate_krig._interpolator
+    assert interpolator_1 is interpolator_2
+
+    # Test that interpolator change when new data is present
+    interpolate_krig(
+        ds_grid,
+        da_cmls=ds_cml_t1_2.R,
+    )
+    interpolator_3 = interpolate_krig._interpolator
+    assert interpolator_3 is not interpolator_1
+
+
 def test_no_data():
     # Test that providing no data raises ValueError
     ds_cml_t1 = ds_cmls.isel(cml_id=[], time=1)
@@ -66,6 +98,7 @@ def test_no_data():
         interpolate.InterpolateOrdinaryKriging(
             ds_grid=ds_rad,
             ds_cmls=ds_cml_t1,
+            min_observations=1,
         )
 
 
