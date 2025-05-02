@@ -28,6 +28,8 @@ class Interpolator:
         self.x_1_cml = None
         self.y_0_cml = None
         self.y_1_cml = None
+        self.cmls_present = False
+        self.gauges_present = False
         self._interpolator = None
 
     def _maybe_update_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
@@ -50,25 +52,32 @@ class Interpolator:
             Initialized interpolator function.
 
         """
-        if (ds_gauges is not None) and (ds_gauges.id.size > 0):
+        # Test if rain gauges changed
+        gauges_present = ds_gauges.id.size > 0 if ds_gauges is not None else False
+
+        if gauges_present:
             # Check if coordinates are the same
             x_gauge = ds_gauges.x.data
             y_gauge = ds_gauges.y.data
             x_gauge_equal = np.array_equal(x_gauge, self.x_gauge)
             y_gauge_equal = np.array_equal(y_gauge, self.y_gauge)
-            gauges_equal = x_gauge_equal and y_gauge_equal
+            gauges_changed = not (x_gauge_equal and y_gauge_equal)
 
-            # Update gauge coordinates
+            # Update gauge coordinates for next iteration
             self.x_gauge = x_gauge
             self.y_gauge = y_gauge
 
-        # Set gauge coordinates to None if gauges not present
         else:
+            # Check if gauge was present in previous run
+            gauges_changed = gauges_present != self.gauges_present
             self.x_gauge = None
             self.y_gauge = None
-            gauges_equal = None
+        self.gauges_present = gauges_present
 
-        if (ds_cmls is not None) and (ds_cmls.cml_id.size > 0):
+        # Test if CML changed
+        cmls_present = ds_cmls.cml_id.size > 0 if ds_cmls is not None else False
+
+        if cmls_present:
             # Check if coordinates are the same
             x_0_cml = ds_cmls.site_0_x.data
             x_1_cml = ds_cmls.site_1_x.data
@@ -78,7 +87,7 @@ class Interpolator:
             cml_x1_eq = np.array_equal(x_1_cml, self.x_1_cml)
             cml_y0_eq = np.array_equal(y_0_cml, self.y_0_cml)
             cml_y1_eq = np.array_equal(y_1_cml, self.y_1_cml)
-            cmls_equal = cml_x0_eq and cml_x1_eq and cml_y0_eq and cml_y1_eq
+            cmls_changed = not (cml_x0_eq and cml_x1_eq and cml_y0_eq and cml_y1_eq)
 
             # Update CML coordinates
             self.x_0_cml = x_0_cml
@@ -86,40 +95,28 @@ class Interpolator:
             self.y_0_cml = y_0_cml
             self.y_1_cml = y_1_cml
 
-        # Set CML coordinates to None if CML not present
         else:
+            # Check if CML was present in previous run
+            cmls_changed = cmls_present != self.cmls_present
             self.x_0_cml = None
             self.x_1_cml = None
             self.y_0_cml = None
             self.y_1_cml = None
-            cmls_equal = None
+        self.cmls_present = cmls_present
 
-        # Test if CML or rain gauges is available
-        gauges_present = (ds_gauges is not None) and (gauges_equal is not None)
-        cmls_present = (ds_cmls is not None) and (cmls_equal is not None)
-
-        # Construct if coordinates changed, else return existing  _interpolator
-        if gauges_present and cmls_present:
-            if (not cmls_equal) or (not gauges_equal):  # CMLS or gauges changed
+        # If CML or rain gauges changed
+        if cmls_changed or gauges_changed:
+            if gauges_present and cmls_present:
                 interpolator = self._init_interpolator(ds_grid, ds_cmls, ds_gauges)
-            else:
-                interpolator = self._interpolator
-
-        elif gauges_present:
-            if not gauges_equal:  # Gauges changed
+            elif gauges_present:
                 interpolator = self._init_interpolator(ds_grid, ds_gauges=ds_gauges)
-            else:
-                interpolator = self._interpolator
-
-        elif cmls_present:
-            if not cmls_equal:  # CMLs changed
+            elif cmls_present:
                 interpolator = self._init_interpolator(ds_grid, ds_cmls=ds_cmls)
             else:
-                interpolator = self._interpolator
-
+                msg = "Please provide CML or rain gauge data"
+                raise ValueError(msg)
         else:
-            msg = "Please provide CML or rain gauge data"
-            raise ValueError(msg)
+            interpolator = self._interpolator
 
         return interpolator
 

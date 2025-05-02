@@ -71,7 +71,7 @@ def test_MergeDifferenceIDW():
         ds_cmls=ds_cmls,
         ds_gauges=ds_gauges,
         nnear=8,
-        min_observations=2,
+        min_observations=1,
         method="additive",
     )
 
@@ -127,6 +127,21 @@ def test_MergeDifferenceIDW():
         ).data
         cml_r = da_cml_t2.sel(cml_id=cml_id).data
         assert cml_r == merge_r
+
+    # Check that field is fit to gauges
+    for id in da_gauges_t2.id:
+        merge_r = adjusted.sel(
+            x=da_gauges_t2.sel(id=id).x,
+            y=da_gauges_t2.sel(id=id).y,
+        ).data
+        gauge_r = da_gauges_t2.sel(id=id).data
+        assert gauge_r == merge_r
+
+    # Update with gauges only
+    adjusted = merger(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t2,
+    )
 
     # Check that field is fit to gauges
     for id in da_gauges_t2.id:

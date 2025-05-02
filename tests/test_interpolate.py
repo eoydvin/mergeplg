@@ -90,15 +90,20 @@ def test_interpolator_update():
 
 def test_no_data():
     # Test that providing no data raises ValueError
-    ds_cml_t1 = ds_cmls.isel(cml_id=[], time=1)
-
+    ds_cml_t1 = ds_cmls.isel(cml_id=[1, 2], time=1)
+    ds_cml_t1_2 = ds_cmls.isel(cml_id=[], time=1)
+    ds_grid = ds_rad.isel(time=0)
+    interpolator = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cml_t1,
+        min_observations=1,
+    )
     # Check that no data causes ValueError
     msg = "Please provide CML or rain gauge data"
     with pytest.raises(ValueError, match=msg):
-        interpolate.InterpolateOrdinaryKriging(
-            ds_grid=ds_rad,
-            ds_cmls=ds_cml_t1,
-            min_observations=1,
+        interpolator(
+            ds_grid,
+            da_cmls=ds_cml_t1_2.R,
         )
 
 
