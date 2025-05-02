@@ -54,6 +54,16 @@ ds_rad = xr.Dataset(
 )
 
 
+def test_cml_midpoint():
+    # Test that CML midpoint is correctly computed
+    y, x = bk_functions.calculate_cml_midpoint(
+        ds_cmls.isel(cml_id=[1]),
+    ).data[0]
+
+    assert x == ds_cmls.isel(cml_id=[1]).x
+    assert y == ds_cmls.isel(cml_id=[1]).y
+
+
 def test_calculate_cml_line():
     # Test that the CML geometry is correctly esimtated
     y, x = bk_functions.calculate_cml_line(
