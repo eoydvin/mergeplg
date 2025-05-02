@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import poligrain as plg
+import pytest
 import xarray as xr
 
 from mergeplg import merge
@@ -53,6 +54,148 @@ ds_rad = xr.Dataset(
         "y_grid": (("y", "x"), np.meshgrid([-1, 0, 1, 2], [-1, 0, 1, 2])[1]),
     },
 )
+
+
+def test_multiplicative_additiveKriging():
+    # CML and rain gauge not overlapping sets
+    da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Additive
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        full_line=False,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        method="additive",
+    )
+
+    # Test that providing only RG works
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+    for gauge_id in da_gauges_t1.id:
+        merge_r = merged.sel(
+            x=da_gauges_t1.sel(id=gauge_id).x.data,
+            y=da_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = da_gauges_t1.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Multiplicative
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        method="multiplicative",
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        full_line=False,
+    )
+
+    # Test that providing only RG works
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+    for gauge_id in da_gauges_t1.id:
+        merge_r = merged.sel(
+            x=da_gauges_t1.sel(id=gauge_id).x.data,
+            y=da_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = da_gauges_t1.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Check that invalid merger causes ValueError
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        method="not_valid_method",
+    )
+    msg = "Method must be multiplicative or additive"
+    with pytest.raises(ValueError, match=msg):
+        merged = merger(
+            da_rad_t,
+            da_gauges=da_gauges_t1,
+        )
+
+
+def test_multiplicative_additiveIDW():
+    # CML and rain gauge not overlapping sets
+    da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Additive
+    merger = merge.MergeDifferenceIDW(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        method="additive",
+    )
+
+    # Test that providing only RG works
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+    for gauge_id in da_gauges_t1.id:
+        merge_r = merged.sel(
+            x=da_gauges_t1.sel(id=gauge_id).x.data,
+            y=da_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = da_gauges_t1.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Multiplicative
+    merger = merge.MergeDifferenceIDW(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        method="multiplicative",
+    )
+
+    # Test that providing only RG works
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+    for gauge_id in da_gauges_t1.id:
+        merge_r = merged.sel(
+            x=da_gauges_t1.sel(id=gauge_id).x.data,
+            y=da_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = da_gauges_t1.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Check that invalid merger causes ValueError
+    merger = merge.MergeDifferenceIDW(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        method="not_valid_method",
+    )
+    msg = "Method must be multiplicative or additive"
+    with pytest.raises(ValueError, match=msg):
+        merged = merger(
+            da_rad_t,
+            da_gauges=da_gauges_t1,
+        )
 
 
 def test_MergeDifferenceIDW():
