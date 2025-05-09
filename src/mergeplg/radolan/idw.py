@@ -173,10 +173,19 @@ class Invdisttree:
 
         self.z = z
 
+        # ix copy for ignoring nan
+        ix = self.ix.copy()
+
+        # Ignore obs with nan
+        flagged_indices = np.where(np.isnan(z))[0]
+
+        # Set ix where obs is flagged equal to n_obs, these are ignored in loop
+        ix[np.isin(ix, flagged_indices)] = len(z)
+
         if idw_method == "standard":
             interpol = _numba_idw_loop(
                 distances=self.distances,
-                ixs=self.ix,
+                ixs=ix,
                 z=self.z,
                 z_shape=z[0].shape,
                 p=p,
@@ -184,7 +193,7 @@ class Invdisttree:
         elif idw_method == "radolan":
             interpol = _numba_idw_loop_radolan(
                 distances=self.distances,
-                ixs=self.ix,
+                ixs=ix,
                 z=self.z,
                 z_shape=z[0].shape,
                 suchradius=max_distance,

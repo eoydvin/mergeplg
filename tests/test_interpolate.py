@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pykrige
+import pytest
 import xarray as xr
 
 from mergeplg import interpolate
@@ -34,9 +35,9 @@ ds_gauges = xr.Dataset(
     coords={
         "id": ("id", ["gauge1", "gauge2", "gauge3"]),
         "time": ("time", np.arange(0, 4)),
-        "lon": ("id", [1, 0, 2]),
+        "lon": ("id", [-1, 0, 2]),
         "lat": ("id", [1, 1, 2]),
-        "x": ("id", [1, 0, 2]),
+        "x": ("id", [-1, 0, 2]),
         "y": ("id", [1, 1, 2]),
     },
 )
@@ -55,37 +56,234 @@ ds_rad = xr.Dataset(
 )
 
 
-def test_blockkriging_vs_pykrige():
-    # CML and rain gauge overlapping sets
-    da_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=[0]).R
-    da_gauges_t1 = ds_gauges.isel(id=[2, 1], time=[0]).R
+def test_interpolator_OK_exact_at_points():
+    # Init data and interpolator, select CML and gauge data that do not overlap
+    ds_cmls_t1 = ds_cmls.isel(cml_id=[0, 1], time=1)
+    ds_gauges_t1 = ds_gauges.isel(id=[0, 1], time=1)
 
-    da_grid = ds_rad.isel(time=[0]).R
+    interpolator = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cmls_t1,
+        ds_gauges=ds_gauges_t1,
+        min_observations=1,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        full_line=False,
+    )
+
+    # Test that providing only RG works
+    interpolated = interpolator(
+        da_gauges=ds_gauges_t1.R,
+    )
+    for gauge_id in ds_gauges_t1.id:
+        merge_r = interpolated.sel(
+            x=ds_gauges_t1.sel(id=gauge_id).x.data,
+            y=ds_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = ds_gauges_t1.R.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Test that providing only CML works
+    interpolated = interpolator(
+        da_cmls=ds_cmls_t1.R,
+    )
+    for cml_id in ds_cmls_t1.cml_id:
+        merge_r = interpolated.sel(
+            x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
+            y=ds_cmls_t1.sel(cml_id=cml_id).y.data,
+        ).data
+        gauge_r = ds_cmls_t1.R.sel(cml_id=cml_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Test that providing RG and CML works
+    interpolated = interpolator(
+        da_cmls=ds_cmls_t1.R,
+        da_gauges=ds_gauges_t1.R,
+    )
+    for cml_id in ds_cmls_t1.cml_id:
+        merge_r = interpolated.sel(
+            x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
+            y=ds_cmls_t1.sel(cml_id=cml_id).y.data,
+        ).data
+        gauge_r = ds_cmls_t1.R.sel(cml_id=cml_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+    for gauge_id in ds_gauges_t1.id:
+        merge_r = interpolated.sel(
+            x=ds_gauges_t1.sel(id=gauge_id).x.data,
+            y=ds_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = ds_gauges_t1.R.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+
+def test_interpolator_IDW_exact_at_points():
+    # Init data and interpolator, select CML and gauge that do not overlap
+    ds_cmls_t1 = ds_cmls.isel(cml_id=[0, 1], time=1)
+    ds_gauges_t1 = ds_gauges.isel(id=[0, 1], time=1)
+
+    interpolator = interpolate.InterpolateIDW(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cmls_t1,
+        ds_gauges=ds_gauges_t1,
+        min_observations=1,
+    )
+
+    # Test that providing only RG works
+    interpolated = interpolator(
+        da_gauges=ds_gauges_t1.R,
+    )
+    for gauge_id in ds_gauges_t1.id:
+        merge_r = interpolated.sel(
+            x=ds_gauges_t1.sel(id=gauge_id).x.data,
+            y=ds_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = ds_gauges_t1.R.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Test that providing only CML works
+    interpolated = interpolator(
+        da_cmls=ds_cmls_t1.R,
+    )
+    for cml_id in ds_cmls_t1.cml_id:
+        merge_r = interpolated.sel(
+            x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
+            y=ds_cmls_t1.sel(cml_id=cml_id).y.data,
+        ).data
+        gauge_r = ds_cmls_t1.R.sel(cml_id=cml_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+    # Test that providing RG and CML works
+    interpolated = interpolator(
+        da_cmls=ds_cmls_t1.R,
+        da_gauges=ds_gauges_t1.R,
+    )
+    for cml_id in ds_cmls_t1.cml_id:
+        merge_r = interpolated.sel(
+            x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
+            y=ds_cmls_t1.sel(cml_id=cml_id).y.data,
+        ).data
+        gauge_r = ds_cmls_t1.R.sel(cml_id=cml_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+    for gauge_id in ds_gauges_t1.id:
+        merge_r = interpolated.sel(
+            x=ds_gauges_t1.sel(id=gauge_id).x.data,
+            y=ds_gauges_t1.sel(id=gauge_id).y.data,
+        ).data
+        gauge_r = ds_gauges_t1.R.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(
+            merge_r,
+            gauge_r,
+            decimal=6,
+        )
+
+
+def test_interpolator_update():
+    # CML and rain gauge overlapping sets
+    ds_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=1)
+    ds_cml_t1_2 = ds_cmls.isel(cml_id=[0, 1], time=1)
 
     # Initialize highlevel-class
-    interpolate_krig = interpolate.InterpolateOrdinaryKriging(min_observations=2)
+    interpolate_krig = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cml_t1,
+    )
+
+    # Test that interpolator do not change
+    interpolator_1 = interpolate_krig._interpolator
+
+    # Interpolate field
+    interpolate_krig(
+        da_cmls=ds_cml_t1.R,
+    )
+    interpolator_2 = interpolate_krig._interpolator
+    assert interpolator_1 is interpolator_2
+
+    # Test that interpolator change when new data is present
+    interpolate_krig(
+        da_cmls=ds_cml_t1_2.R,
+    )
+    interpolator_3 = interpolate_krig._interpolator
+    assert interpolator_3 is not interpolator_1
+
+
+def test_no_data():
+    # Test that providing no data raises ValueError
+    ds_cml_t1 = ds_cmls.isel(cml_id=[1, 2], time=1)
+    ds_cml_t1_2 = ds_cmls.isel(cml_id=[], time=1)
+
+    interpolator = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cml_t1,
+        min_observations=1,
+    )
+    # Check that no data causes ValueError
+    msg = "Please provide CML or rain gauge data"
+    with pytest.raises(ValueError, match=msg):
+        interpolator(
+            da_cmls=ds_cml_t1_2.R,
+        )
+
+
+def test_blockkriging_vs_pykrige():
+    # CML and rain gauge overlapping sets
+    ds_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=1)
+
+    ds_grid = ds_rad.isel(time=0)
 
     variogram_model = "exponential"
     variogram_parameters = {"sill": 1, "range": 2, "nugget": 0.5}
 
-    # Interpolate field
-    interp_field = interpolate_krig.interpolate(
-        da_grid,
-        da_cml=da_cml_t1,
-        da_gauge=da_gauges_t1,
+    # Initialize highlevel-class
+    interpolate_krig = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
+        ds_cmls=ds_cml_t1,
+        full_line=False,
         variogram_model=variogram_model,
         variogram_parameters=variogram_parameters,
-        nnear=False,
-        full_line=False,
+        nnear=12,
+        min_observations=1,
     )
 
-    # Get ground observations and x0 geometry
-    obs, x0 = interpolate_krig.get_obs_x0_(da_cml=da_cml_t1, da_gauge=da_gauges_t1)
+    # Interpolate field
+    interp_field = interpolate_krig(
+        da_cmls=ds_cml_t1.R,
+    )
+
+    x_mid = 0.5 * (ds_cml_t1.site_0_x + ds_cml_t1.site_1_x).data
+    y_mid = 0.5 * (ds_cml_t1.site_0_y + ds_cml_t1.site_1_y).data
+    obs = ds_cml_t1.R.data
 
     # Setup pykrige using midpoint of CMLs as reference
     ok = pykrige.OrdinaryKriging(
-        x0[:, 1, int(x0.shape[2] / 2)],  # x-midpoint coordinate
-        x0[:, 0, int(x0.shape[2] / 2)],  # y-midpoint coordinate
+        x_mid.ravel(),
+        y_mid.ravel(),
         obs.ravel(),
         variogram_model=variogram_model,
         variogram_parameters=variogram_parameters,
@@ -95,76 +293,10 @@ def test_blockkriging_vs_pykrige():
 
     z, ss = ok.execute(
         "points",
-        da_grid.y_grid.data.ravel().astype(float),
-        da_grid.x_grid.data.ravel().astype(float),
+        ds_grid.x_grid.data.ravel().astype(float),
+        ds_grid.y_grid.data.ravel().astype(float),
     )
 
-    interp_field_pykrige = [z.reshape(da_grid.x_grid.shape)]
+    interp_field_pykrige = z.reshape(ds_grid.x_grid.shape)
 
     np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
-
-
-def test_idw_interpolate_with_data_without_time_dim():
-    idw_interpolator = interpolate.InterpolateIDW(min_observations=2)
-    # Make sure that the interpolation works with and without time dimension
-    # in the supplied data arrays and that resulta are the same
-    R_grid_idw_no_time_dim = idw_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=0),
-        da_cml=ds_cmls.R.isel(time=0),
-        p=3,
-        idw_method="standard",
-    )
-    R_grid_idw_with_time_dim = idw_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=[0]),
-        da_cml=ds_cmls.R.isel(time=[0]),
-        p=3,
-        idw_method="standard",
-    ).isel(time=0)
-    np.testing.assert_almost_equal(
-        R_grid_idw_no_time_dim.data, R_grid_idw_with_time_dim.data
-    )
-    # Same with gauge data ds_geauges instead of ds_cmls
-    R_grid_idw_no_time_dim = idw_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=0),
-        da_gauge=ds_gauges.R.isel(time=0),
-        p=3,
-        idw_method="standard",
-    )
-    R_grid_idw_with_time_dim = idw_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=[0]),
-        da_gauge=ds_gauges.R.isel(time=[0]),
-        p=3,
-        idw_method="standard",
-    ).isel(time=0)
-    np.testing.assert_almost_equal(
-        R_grid_idw_no_time_dim.data, R_grid_idw_with_time_dim.data
-    )
-
-
-def test_ok_interpolate_with_data_without_time_dim():
-    ok_interpolator = interpolate.InterpolateOrdinaryKriging(min_observations=2)
-    # Make sure that the interpolation works with and without time dimension
-    # in the supplied data arrays and that resulta are the same
-    R_grid_idw_no_time_dim = ok_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=0),
-        da_cml=ds_cmls.R.isel(time=0),
-    )
-    R_grid_idw_with_time_dim = ok_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=[0]),
-        da_cml=ds_cmls.R.isel(time=[0]),
-    ).isel(time=0)
-    np.testing.assert_almost_equal(
-        R_grid_idw_no_time_dim.data, R_grid_idw_with_time_dim.data
-    )
-    # Same with gauge data ds_geauges instead of ds_cmls
-    R_grid_idw_no_time_dim = ok_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=0),
-        da_gauge=ds_gauges.R.isel(time=0),
-    )
-    R_grid_idw_with_time_dim = ok_interpolator.interpolate(
-        da_grid=ds_rad.R.isel(time=[0]),
-        da_gauge=ds_gauges.R.isel(time=[0]),
-    ).isel(time=0)
-    np.testing.assert_almost_equal(
-        R_grid_idw_no_time_dim.data, R_grid_idw_with_time_dim.data
-    )
