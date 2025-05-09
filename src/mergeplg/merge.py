@@ -504,7 +504,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         return da
 
 
-class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
+class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
     """Merge CML and radar using kriging with external drift.
 
     Merges the provided radar field in ds_rad to CML and rain gauge
@@ -554,7 +554,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
 
         """
         # Init interpolator
-        interpolate.InterpolateKriging.__init__(
+        interpolate.InterpolateKrigingBase.__init__(
             self,
             ds_grid=ds_rad,
             ds_cmls=ds_cmls,

@@ -10,7 +10,7 @@ from mergeplg import bk_functions
 from .radolan import idw
 
 
-class Interpolator:
+class InterpolatorBase:
     """Base class.
 
     Base class providing functions for testing if the cml and rain gauge
@@ -133,7 +133,7 @@ class Interpolator:
         return interpolator
 
 
-class InterpolateIDW(Interpolator):
+class InterpolateIDW(InterpolatorBase):
     """Interpolate CML and rain gauge using IDW
 
     Interpolates the provided CML and rain gauge observations using
@@ -176,7 +176,7 @@ class InterpolateIDW(Interpolator):
             Largest distance allowed for including an observation.
         """
         # Init base class
-        Interpolator.__init__(self, ds_grid)
+        InterpolatorBase.__init__(self, ds_grid)
         self._interpolator = self._maybe_update_interpolator(
             self.y_grid, self.x_grid, ds_cmls, ds_gauges
         )
@@ -279,7 +279,7 @@ class InterpolateIDW(Interpolator):
         return da
 
 
-class InterpolateKriging(Interpolator):
+class InterpolateKrigingBase(InterpolatorBase):
     """Shared kriging functions for Ordinary Kriging and KED (see merging class)
 
     Constructs the variogram and function for returning observations
@@ -345,7 +345,7 @@ class InterpolateKriging(Interpolator):
         )
 
         # Init base class
-        Interpolator.__init__(self, ds_grid)
+        InterpolatorBase.__init__(self, ds_grid)
         self._interpolator = self._maybe_update_interpolator(
             self.y_grid, self.x_grid, ds_cmls, ds_gauges
         )
@@ -384,7 +384,7 @@ class InterpolateKriging(Interpolator):
         return obs, sigma
 
 
-class InterpolateOrdinaryKriging(InterpolateKriging):
+class InterpolateOrdinaryKriging(InterpolateKrigingBase):
     """Interpolate CML and rain gauge data using Ordinary Kriging
 
     Interpolates the provided CML and rain gauge observations using
