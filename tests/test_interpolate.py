@@ -60,7 +60,6 @@ def test_interpolator_OK_exact_at_points():
     # Init data and interpolator, select CML and gauge data that do not overlap
     ds_cmls_t1 = ds_cmls.isel(cml_id=[0, 1], time=1)
     ds_gauges_t1 = ds_gauges.isel(id=[0, 1], time=1)
-    ds_grid = ds_rad.isel(time=0)
 
     interpolator = interpolate.InterpolateOrdinaryKriging(
         ds_grid=ds_rad,
@@ -136,7 +135,6 @@ def test_interpolator_IDW_exact_at_points():
     # Init data and interpolator, select CML and gauge that do not overlap
     ds_cmls_t1 = ds_cmls.isel(cml_id=[0, 1], time=1)
     ds_gauges_t1 = ds_gauges.isel(id=[0, 1], time=1)
-    ds_grid = ds_rad.isel(time=0)
 
     interpolator = interpolate.InterpolateIDW(
         ds_grid=ds_rad,
@@ -210,7 +208,6 @@ def test_interpolator_update():
     # CML and rain gauge overlapping sets
     ds_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=1)
     ds_cml_t1_2 = ds_cmls.isel(cml_id=[0, 1], time=1)
-    ds_grid = ds_rad.isel(time=0)
 
     # Initialize highlevel-class
     interpolate_krig = interpolate.InterpolateOrdinaryKriging(
@@ -240,8 +237,9 @@ def test_no_data():
     # Test that providing no data raises ValueError
     ds_cml_t1 = ds_cmls.isel(cml_id=[1, 2], time=1)
     ds_cml_t1_2 = ds_cmls.isel(cml_id=[], time=1)
-    ds_grid = ds_rad.isel(time=0)
+
     interpolator = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_rad,
         ds_cmls=ds_cml_t1,
         min_observations=1,
     )

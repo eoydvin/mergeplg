@@ -22,7 +22,7 @@ class MergeBase:
         self.get_grid_at_points = None
         self.grid_location_radar = None
 
-    def _get_rad(self, da_rad, da_cmls=None, da_gauges=None):
+    def _get_rad(self, da_rad, da_cmls, da_gauges):
         """Get radar value at CML and rain gauge positions
 
         Updates the functions "grid_at_points" and
@@ -54,7 +54,7 @@ class MergeBase:
 
         return np.concatenate([rad_cmls, rad_gauges]).astype(float)
 
-    def _update_weights(self, da_grid, da_cml=None, da_gauge=None):
+    def _update_weights(self, da_grid, da_cml, da_gauge):
         """Update grid weights for CML and gauge
 
         Constructs the CML intersect weights, for retrieving rainfall rates along
@@ -272,10 +272,11 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         """
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(
-            self.y_grid, self.x_grid, da_cmls, da_gauges)
+            self.y_grid, self.x_grid, da_cmls, da_gauges
+        )
 
         # Update weights used for merging
-        self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
+        self._update_weights(da_rad, da_cmls, da_gauges)
 
         # Get observations and radar for current time step
         obs = self._get_obs(da_cmls, da_gauges)
@@ -298,9 +299,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             raise ValueError(msg)
 
         # Coordinates to predict
-        coord_pred = np.hstack(
-            [self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)]
-        )
+        coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
 
         # Interpolate difference
         interpolated = self._interpolator(
@@ -324,14 +323,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
-        if (da_cmls is not None):
-            time = da_cmls.time
-        elif (da_gauges is not None):
-            time = da_gauges.time
-
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords['time'] = time
+        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
         return da
+
 
 class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, MergeBase):
     """Merge CML and radar using ordinary kriging
@@ -411,7 +406,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self.method = method
-        self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
+        self._update_weights(ds_rad, ds_cmls, ds_gauges)
 
     def __call__(
         self,
@@ -455,7 +450,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         )
 
         # Update weights used for merging
-        self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
+        self._update_weights(da_rad, da_cmls, da_gauges)
 
         # Get observations, sigma and radar for current time step
         obs, sigma = self._get_obs_sigma(
@@ -494,13 +489,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
-        if (da_cmls is not None):
-            time = da_cmls.time
-        elif (da_gauges is not None):
-            time = da_gauges.time
-
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords['time'] = time
+        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
         return da
 
 
@@ -571,7 +561,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         # Init weights update
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
-        self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
+        self._update_weights(ds_rad, ds_cmls, ds_gauges)
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -627,7 +617,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         )
 
         # Update weights used for merging
-        self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
+        self._update_weights(da_rad, da_cmls, da_gauges)
 
         # Get observations, sigma and radar for current time step
         obs, sigma = self._get_obs_sigma(
@@ -657,12 +647,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
 
         # Remove negative values
         adjusted[(adjusted < 0) | np.isnan(adjusted)] = 0
-        
-        if (da_cmls is not None):
-            time = da_cmls.time
-        elif (da_gauges is not None):
-            time = da_gauges.time
 
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords['time'] = time
+        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
         return da
