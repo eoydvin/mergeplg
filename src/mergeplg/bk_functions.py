@@ -25,7 +25,8 @@ class OBKrigTree:
     def __init__(
         self,
         variogram,
-        ds_grid,
+        y_grid,
+        x_grid,
         ds_cmls=None,
         ds_gauges=None,
         discretization=8,
@@ -44,9 +45,8 @@ class OBKrigTree:
         variogram: function
             A user defined function defining the variogram. Input
             distance, returns the expected variance.
-        da_grid: xarray.DataArray
-            Dataarray providing the grid for interpolation. Must contain
-            projected x_grid and y_grid coordinates.
+        y_grid/x_grid np.array
+            Projected grid coordinates to interpolate on.
         ds_cmls: xarray.Dataset
             CML dataset or data array. Must contain the projected coordinates
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
@@ -130,26 +130,19 @@ class OBKrigTree:
         mat[-1, :-1] = np.ones(cov_mat.shape[1])  # non-bias condition
         mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
-        # Points to interpolate
-        points = np.hstack(
-            [
-                ds_grid.y_grid.data.reshape(-1, 1),
-                ds_grid.x_grid.data.reshape(-1, 1),
-            ]
-        )
-
         # Midpoint coordinates of observations
         x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
         y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
-        xgrid, ygrid = points[:, 0], points[:, 1]
+        xgrid = x_grid.ravel()
+        ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
             data=list(zip(x_neighbours, y_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid, strict=False)),
+            list(zip(ygrid, xgrid, strict=False)),
             k=nnear * nnear_mult,  # get distance to nearby links
             distance_upper_bound=max_distance,
         )
@@ -161,8 +154,8 @@ class OBKrigTree:
         ixs[out_of_range_mask] = n_obs
 
         # Vectorized difference estimate
-        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
-        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        y_reshaped = ygrid[:, np.newaxis, np.newaxis]
+        x_reshaped = xgrid[:, np.newaxis, np.newaxis]
         delta_y = x0[:, 0, :] - y_reshaped
         delta_x = x0[:, 1, :] - x_reshaped
         lengths = np.sqrt(delta_x**2 + delta_y**2)
@@ -177,7 +170,6 @@ class OBKrigTree:
         self.var_line_point = var_line_point
         self.ixs = ixs
         self.nnear = nnear
-        self.xgrid = ds_grid.x_grid.data.astype(float)
 
     def __call__(self, obs, sigma):
         """Interpolate obs for one timestep
@@ -218,6 +210,7 @@ class OBKrigTree:
         var_line_point = self.var_line_point[~mask]
 
         # array for storing CML-radar merge
+        est_with_nan = np.zeros(self.ixs.shape[0])
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
@@ -241,9 +234,8 @@ class OBKrigTree:
             estimate[i] = obs[ind] @ w
 
         # Return dataset with interpolated values
-        rain = np.full_like(self.xgrid.ravel(), 0)
-        rain[~mask] = estimate
-        return rain
+        est_with_nan[~mask] = estimate
+        return est_with_nan
 
 
 class BKEDTree:
@@ -262,7 +254,8 @@ class BKEDTree:
     def __init__(
         self,
         variogram,
-        ds_rad,
+        y_grid,
+        x_grid,
         ds_cmls=None,
         ds_gauges=None,
         discretization=8,
@@ -280,9 +273,8 @@ class BKEDTree:
         variogram: function
             A user defined function defining the variogram. Input
             distance, returns the expected variance.
-        ds_rad: xarray.DataArray
-            Dataarray providing the grid for interpolation. Must contain
-            projected x_grid and y_grid coordinates.
+        y_grid/x_grid np.array
+            Projected grid coordinates to interpolate on.
         ds_cmls: xarray.Dataset
             CML dataset or data array. Must contain the projected coordinates
             of the CML (site_0_x, site_0_y, site_1_x, da_cml.site_1_y).
@@ -362,26 +354,19 @@ class BKEDTree:
         mat[-2, :-2] = np.ones(cov_mat.shape[1])  # non-bias condition
         mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
 
-        # Points to interpolate
-        points = np.hstack(
-            [
-                ds_rad.y_grid.data.reshape(-1, 1),
-                ds_rad.x_grid.data.reshape(-1, 1),
-            ]
-        )
-
         # Midpoint coordinates of observations
         x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
         y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
-        xgrid, ygrid = points[:, 0], points[:, 1]
+        xgrid = x_grid.ravel()
+        ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
             data=list(zip(x_neighbours, y_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
-            list(zip(xgrid, ygrid, strict=False)),
+            list(zip(ygrid, xgrid, strict=False)),
             k=nnear * nnear_mult,  # get distance to nearby links
             distance_upper_bound=max_distance,
         )
@@ -393,8 +378,8 @@ class BKEDTree:
         ixs[out_of_range_mask] = n_obs
 
         # Vectorized difference estimate
-        y_reshaped = points[:, 0, np.newaxis, np.newaxis]
-        x_reshaped = points[:, 1, np.newaxis, np.newaxis]
+        y_reshaped = ygrid[:, np.newaxis, np.newaxis]
+        x_reshaped = xgrid[:, np.newaxis, np.newaxis]
         delta_y = x0[:, 0, :] - y_reshaped
         delta_x = x0[:, 1, :] - x_reshaped
         lengths = np.sqrt(delta_x**2 + delta_y**2)
@@ -409,7 +394,6 @@ class BKEDTree:
         self.var_line_point = var_line_point
         self.ixs = ixs
         self.nnear = nnear
-        self.xgrid = ds_rad.x_grid.data.astype(float)
 
     def __call__(
         self,
@@ -463,6 +447,7 @@ class BKEDTree:
         rad_field = rad_field[~mask]
 
         # array for storing CML-radar merge
+        est_with_nan = np.zeros(self.ixs.shape[0])
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
@@ -490,9 +475,8 @@ class BKEDTree:
             estimate[i] = obs[ind] @ w
 
         # Return dataset with interpolated values
-        rain = np.full_like(self.xgrid.ravel(), 0)
-        rain[~mask] = estimate
-        return rain
+        est_with_nan[~mask] = estimate
+        return est_with_nan
 
 
 def within_block_l(x0):

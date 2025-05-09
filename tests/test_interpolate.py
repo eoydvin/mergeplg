@@ -73,7 +73,6 @@ def test_interpolator_OK_exact_at_points():
 
     # Test that providing only RG works
     interpolated = interpolator(
-        ds_grid,
         da_gauges=ds_gauges_t1.R,
     )
     for gauge_id in ds_gauges_t1.id:
@@ -90,7 +89,6 @@ def test_interpolator_OK_exact_at_points():
 
     # Test that providing only CML works
     interpolated = interpolator(
-        ds_grid,
         da_cmls=ds_cmls_t1.R,
     )
     for cml_id in ds_cmls_t1.cml_id:
@@ -107,7 +105,6 @@ def test_interpolator_OK_exact_at_points():
 
     # Test that providing RG and CML works
     interpolated = interpolator(
-        ds_grid,
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
     )
@@ -150,7 +147,6 @@ def test_interpolator_IDW_exact_at_points():
 
     # Test that providing only RG works
     interpolated = interpolator(
-        ds_grid,
         da_gauges=ds_gauges_t1.R,
     )
     for gauge_id in ds_gauges_t1.id:
@@ -167,7 +163,6 @@ def test_interpolator_IDW_exact_at_points():
 
     # Test that providing only CML works
     interpolated = interpolator(
-        ds_grid,
         da_cmls=ds_cmls_t1.R,
     )
     for cml_id in ds_cmls_t1.cml_id:
@@ -184,7 +179,6 @@ def test_interpolator_IDW_exact_at_points():
 
     # Test that providing RG and CML works
     interpolated = interpolator(
-        ds_grid,
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
     )
@@ -229,7 +223,6 @@ def test_interpolator_update():
 
     # Interpolate field
     interpolate_krig(
-        ds_grid,
         da_cmls=ds_cml_t1.R,
     )
     interpolator_2 = interpolate_krig._interpolator
@@ -237,7 +230,6 @@ def test_interpolator_update():
 
     # Test that interpolator change when new data is present
     interpolate_krig(
-        ds_grid,
         da_cmls=ds_cml_t1_2.R,
     )
     interpolator_3 = interpolate_krig._interpolator
@@ -250,7 +242,6 @@ def test_no_data():
     ds_cml_t1_2 = ds_cmls.isel(cml_id=[], time=1)
     ds_grid = ds_rad.isel(time=0)
     interpolator = interpolate.InterpolateOrdinaryKriging(
-        ds_grid=ds_rad,
         ds_cmls=ds_cml_t1,
         min_observations=1,
     )
@@ -258,7 +249,6 @@ def test_no_data():
     msg = "Please provide CML or rain gauge data"
     with pytest.raises(ValueError, match=msg):
         interpolator(
-            ds_grid,
             da_cmls=ds_cml_t1_2.R,
         )
 
@@ -285,7 +275,6 @@ def test_blockkriging_vs_pykrige():
 
     # Interpolate field
     interp_field = interpolate_krig(
-        ds_grid,
         da_cmls=ds_cml_t1.R,
     )
 

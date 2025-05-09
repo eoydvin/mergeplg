@@ -271,7 +271,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             interpolated field.
         """
         # Get updated interpolator object
-        self._interpolator = self._maybe_update_interpolator(da_rad, da_cmls, da_gauges)
+        self._interpolator = self._maybe_update_interpolator(
+            self.y_grid, self.x_grid, da_cmls, da_gauges)
 
         # Update weights used for merging
         self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
@@ -298,7 +299,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Coordinates to predict
         coord_pred = np.hstack(
-            [da_rad.y_grid.data.reshape(-1, 1), da_rad.x_grid.data.reshape(-1, 1)]
+            [self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)]
         )
 
         # Interpolate difference
@@ -309,10 +310,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             p=self.p,
             idw_method=self.idw_method,
             max_distance=self.max_distance,
-        ).reshape(da_rad.x_grid.shape)
+        ).reshape(self.x_grid.shape)
 
         interpolated = xr.DataArray(
-            data=interpolated, coords=da_rad.coords, dims=da_rad.dims
+            data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
 
         # Adjust radar field
@@ -323,8 +324,14 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
-        return adjusted
+        if (da_cmls is not None):
+            time = da_cmls.time
+        elif (da_gauges is not None):
+            time = da_gauges.time
 
+        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
+        da.coords['time'] = time
+        return da
 
 class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, MergeBase):
     """Merge CML and radar using ordinary kriging
@@ -443,7 +450,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             interpolated field.
         """
         # Get updated interpolator object
-        self._interpolator = self._maybe_update_interpolator(da_rad, da_cmls, da_gauges)
+        self._interpolator = self._maybe_update_interpolator(
+            self.y_grid, self.x_grid, da_cmls, da_gauges
+        )
 
         # Update weights used for merging
         self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
@@ -472,9 +481,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             return da_rad
 
         # Interpolate the difference
-        interpolated = self._interpolator(diff, sigma).reshape(da_rad.x_grid.shape)
+        interpolated = self._interpolator(diff, sigma).reshape(self.x_grid.shape)
         interpolated = xr.DataArray(
-            data=interpolated, coords=da_rad.coords, dims=da_rad.dims
+            data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
 
         # Adjust radar field
@@ -485,7 +494,14 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             adjusted = interpolated * da_rad
             adjusted.data[adjusted < 0] = 0
 
-        return adjusted
+        if (da_cmls is not None):
+            time = da_cmls.time
+        elif (da_gauges is not None):
+            time = da_gauges.time
+
+        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
+        da.coords['time'] = time
+        return da
 
 
 class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
@@ -557,10 +573,11 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
 
-    def _init_interpolator(self, ds_grid, ds_cmls=None, ds_gauges=None):
+    def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
             self.variogram,
-            ds_rad=ds_grid,
+            y_grid,
+            x_grid,
             ds_cmls=ds_cmls,
             ds_gauges=ds_gauges,
             discretization=self.discretization,
@@ -605,7 +622,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
             interpolated field.
         """
         # Get updated interpolator object
-        self._interpolator = self._maybe_update_interpolator(da_rad, da_cmls, da_gauges)
+        self._interpolator = self._maybe_update_interpolator(
+            self.y_grid, self.x_grid, da_cmls, da_gauges
+        )
 
         # Update weights used for merging
         self._update_weights(da_rad, da_cml=da_cmls, da_gauge=da_gauges)
@@ -634,8 +653,16 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKriging, MergeBase):
             obs,
             rad,
             sigma,
-        ).reshape(da_rad.x_grid.shape)
+        ).reshape(self.x_grid.shape)
 
         # Remove negative values
         adjusted[(adjusted < 0) | np.isnan(adjusted)] = 0
-        return xr.DataArray(data=adjusted, coords=da_rad.coords, dims=da_rad.dims)
+        
+        if (da_cmls is not None):
+            time = da_cmls.time
+        elif (da_gauges is not None):
+            time = da_gauges.time
+
+        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
+        da.coords['time'] = time
+        return da
