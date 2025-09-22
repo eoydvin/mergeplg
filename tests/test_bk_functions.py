@@ -81,6 +81,7 @@ def test_block_points_to_lengths():
             ds_cmls.isel(cml_id=[0, 1]), discretization=2
         ).data
     )
+
     l0l0 = line[0, 0]  # Lengths from link0 to link0
     l0l1 = line[0, 1]  # Lengths from link0 to link0
     l1l0 = line[1, 0]  # Lengths from link0 to link0
@@ -98,14 +99,14 @@ def test_block_points_to_lengths():
         )
     ).all()
 
-    # Length matrix from line1 to lin2
+    # Length matrix from line1 to line2
     assert (
         l0l1
         == np.array(
             [
+                [1, np.sqrt(2**2 + 1), np.sqrt(3**2 + 2**2)],
                 [1, 1, np.sqrt(2**2 + 1)],
                 [np.sqrt(2**2 + 1), 1, 1],
-                [np.sqrt(3**2 + 2**2), np.sqrt(2**2 + 1), 1],
             ]
         )
     ).all()
@@ -115,9 +116,9 @@ def test_block_points_to_lengths():
         l1l0
         == np.array(
             [
-                [1, np.sqrt(2**2 + 1), np.sqrt(3**2 + 2**2)],
-                [1, 1, np.sqrt(2**2 + 1)],
-                [np.sqrt(1 + 2**2), 1, 1],
+                [1, 1, np.sqrt(2**2 + 1**2)],
+                [np.sqrt(2**2 + 1), 1, 1],
+                [np.sqrt(3**2 + 2**2), np.sqrt(2**2 + 1), 1],
             ]
         )
     ).all()
