@@ -153,15 +153,16 @@ class OBKrigTree:
         # Set out of range observations to nobs
         ixs[out_of_range_mask] = n_obs
 
-        # Vectorized difference estimate
-        y_reshaped = ygrid[:, np.newaxis, np.newaxis]
-        x_reshaped = xgrid[:, np.newaxis, np.newaxis]
-        delta_y = x0[:, 0, :] - y_reshaped
-        delta_x = x0[:, 1, :] - x_reshaped
-        lengths = np.sqrt(delta_x**2 + delta_y**2)
-
-        # Estimate expected variance for all links
-        var_line_point = variogram(lengths).mean(axis=2)
+        # Compute variance from obs to all grid cells
+        var_line_point = np.zeros([xgrid.size, n_obs])
+        y_reshaped = ygrid[:, np.newaxis]
+        x_reshaped = xgrid[:, np.newaxis]
+        for i in range(n_obs):
+            # y distance from obs i to all gridpoints
+            delta_y = x0[i, 0, :] - y_reshaped
+            delta_x = x0[i, 1, :] - x_reshaped
+            lengths = np.sqrt(delta_x**2 + delta_y**2)
+            var_line_point[:, i] = variogram(lengths).mean(axis=1)
 
         # Store data to self
         self.mat = mat
@@ -546,34 +547,20 @@ def block_points_to_lengths(x0):
         can be calculated by lengths_point_l.mean(axis = (2, 3)).
 
     """
-    # Calculate the x distance between all points
-    delta_x = np.array(
-        [
-            x0[i][1] - x0[j][1].reshape(-1, 1)
-            for i in range(x0.shape[0])
-            for j in range(x0.shape[0])
-        ]
+    # Extract x and y coordinates
+    y_coords = x0[:, 0, :]
+    x_coords = x0[:, 1, :]
+
+    # Use broadcasting to calculate pairwise differences
+    delta_x = (
+        x_coords[np.newaxis, :, np.newaxis, :] - x_coords[:, np.newaxis, :, np.newaxis]
+    )
+    delta_y = (
+        y_coords[np.newaxis, :, np.newaxis, :] - y_coords[:, np.newaxis, :, np.newaxis]
     )
 
-    # Calculate the y-distance between all points
-    delta_y = np.array(
-        [
-            x0[i][0] - x0[j][0].reshape(-1, 1)
-            for i in range(x0.shape[0])
-            for j in range(x0.shape[0])
-        ]
-    )
-
-    # Calculate corresponding length between all points
-    lengths_point_l = np.sqrt(delta_x**2 + delta_y**2)
-
-    # Reshape to (n_lines, n_lines, disc, disc)
-    return lengths_point_l.reshape(
-        int(np.sqrt(lengths_point_l.shape[0])),
-        int(np.sqrt(lengths_point_l.shape[0])),
-        lengths_point_l.shape[1],
-        lengths_point_l.shape[2],
-    )
+    # Compute lengths between all pairs
+    return np.sqrt(delta_x**2 + delta_y**2)
 
 
 def construct_variogram(
