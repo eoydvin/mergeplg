@@ -408,6 +408,12 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        additive_factor: float
+            Differences between radar and ground observations larger than
+            this threshold is ignored.
+        multiplicative_factors: list
+            Ratios between radar and ground observations above and
+            below these two thresholds is ignored.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -547,6 +553,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         min_observations=1,
         nnear=8,
         max_distance=60000,
+        additive_factor=10,
     ):
         """
         Initialize merging object.
@@ -574,7 +581,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             Number of closest links to use for interpolation
         max_distance: float
             Largest distance allowed for including an observation.
-
+        additive_factor: float
+            Differences between radar and ground observations larger than
+            this threshold is ignored.
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -595,6 +604,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.additive_factor = additive_factor
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -659,7 +669,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
         # Default decision on which observations to ignore
-        ignore = np.isnan(rad) & (obs == 0) & (rad == 0)
+        diff = np.abs(obs - rad) > self.additive_factor
+        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | diff
         obs[ignore] = np.nan  # obs nan ar ignored in interpolator
 
         # If few observations return zero grid
