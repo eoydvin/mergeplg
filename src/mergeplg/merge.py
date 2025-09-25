@@ -196,6 +196,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         nnear=8,
         max_distance=60000,
         method="additive",
+        additive_factor=10,
+        multiplicative_factors=(0.1, 15),
     ):
         """
         Initialize merging object.
@@ -225,6 +227,12 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
+        additive_factor: float
+            Differences between radar and ground observations larger than
+            this threshold is ignored.
+        multiplicative_factors: list
+            Ratios between radar and ground observations above and
+            below these two thresholds is ignored.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -244,6 +252,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
+        self.additive_factor = additive_factor
+        self.multiplicative_factors = multiplicative_factors
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -289,11 +299,21 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
+            diff = np.where(diff < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+
+            # Ignore pairs with large difference
+            diff = xr.where(
+                (diff < self.multiplicative_factors[0])
+                | (diff > self.multiplicative_factors[1]),
+                np.nan,
+                diff,
+            )
+
         else:
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
@@ -353,6 +373,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         nnear=8,
         max_distance=60000,
         full_line=True,
+        additive_factor=10,
+        multiplicative_factors=(0.1, 15),
     ):
         """
         Initialize merging object.
@@ -407,6 +429,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.additive_factor = additive_factor
+        self.multiplicative_factors = multiplicative_factors
 
     def __call__(
         self,
@@ -461,11 +485,20 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
+            diff = np.where(diff < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+
+            # Ignore pairs with large difference
+            diff = xr.where(
+                (diff < self.multiplicative_factors[0])
+                | (diff > self.multiplicative_factors[1]),
+                np.nan,
+                diff,
+            )
 
         else:
             msg = "Method must be multiplicative or additive"
