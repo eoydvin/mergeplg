@@ -671,7 +671,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         # Default decision on which observations to ignore
         diff = np.abs(obs - rad) > self.additive_factor
         ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | diff
-        obs[ignore] = np.nan  # obs nan ar ignored in interpolator
+        obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
         # If few observations return radar
         if (~np.isnan(obs)).sum() <= self.min_observations:

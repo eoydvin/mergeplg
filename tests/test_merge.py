@@ -198,6 +198,82 @@ def test_multiplicative_additiveIDW():
         )
 
 
+def test_obk_filter():
+    # Test that large differences from radar and obs is removved
+    # CML and rain gauge overlapping sets
+    da_gauges_t = ds_gauges.isel(id=[1, 2], time=0).R
+
+    # Set one unrealistically high rain gauge value
+    da_gauges_t.data = np.array([1, 40])
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Initialize highlevel-class
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=da_rad_t,
+        ds_gauges=da_gauges_t,
+        nnear=8,
+        min_observations=1,
+        method="additive",
+        additive_factor=10,
+    )
+
+    # Adjust field
+    adjusted = merger(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t,
+    )
+
+    # Test that first obs is accounted for
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=0).x,
+        y=da_gauges_t.isel(id=0).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=0).data
+    assert cml_r == merge_r
+
+    # Test that second obs is ignored
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=1).x,
+        y=da_gauges_t.isel(id=1).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=1).data
+    assert cml_r != merge_r
+
+    # Initialize highlevel-class
+    merger = merge.MergeDifferenceIDW(
+        ds_rad=da_rad_t,
+        ds_gauges=da_gauges_t,
+        nnear=8,
+        min_observations=1,
+        method="multiplicative",
+        additive_factor=10,
+    )
+
+    # Adjust field
+    adjusted = merger(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t,
+    )
+
+    # Test that first obs is accounted for
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=0).x,
+        y=da_gauges_t.isel(id=0).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=0).data
+    assert cml_r == merge_r
+
+    # Test that second obs is ignored
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=1).x,
+        y=da_gauges_t.isel(id=1).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=1).data
+    assert cml_r != merge_r
+
+
 def test_idw_filter():
     # Test that large differences from radar and obs is removved
     # CML and rain gauge overlapping sets
@@ -205,7 +281,6 @@ def test_idw_filter():
 
     # Set one unrealistically high rain gauge value
     da_gauges_t.data = np.array([1, 40])
-    print(da_gauges_t)
 
     # Select radar timestep
     da_rad_t = ds_rad.isel(time=0).R
@@ -217,6 +292,38 @@ def test_idw_filter():
         nnear=8,
         min_observations=1,
         method="additive",
+        additive_factor=10,
+    )
+
+    # Adjust field
+    adjusted = merger(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t,
+    )
+
+    # Test that first obs is accounted for
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=0).x,
+        y=da_gauges_t.isel(id=0).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=0).data
+    assert cml_r == merge_r
+
+    # Test that second obs is ignored
+    merge_r = adjusted.sel(
+        x=da_gauges_t.isel(id=1).x,
+        y=da_gauges_t.isel(id=1).y,
+    ).data
+    cml_r = da_gauges_t.isel(id=1).data
+    assert cml_r != merge_r
+
+    # Initialize highlevel-class
+    merger = merge.MergeDifferenceIDW(
+        ds_rad=da_rad_t,
+        ds_gauges=da_gauges_t,
+        nnear=8,
+        min_observations=1,
+        method="multiplicative",
         additive_factor=10,
     )
 
