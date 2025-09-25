@@ -299,7 +299,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(diff < self.additive_factor, diff, np.nan)
+            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
@@ -485,7 +485,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(diff < self.additive_factor, diff, np.nan)
+            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
