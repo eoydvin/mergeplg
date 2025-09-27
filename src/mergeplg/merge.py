@@ -308,8 +308,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
             # Ignore pairs with large difference
             diff = xr.where(
-                (diff < self.ratio_factors[0])
-                | (diff > self.ratio_factors[1]),
+                (diff < self.ratio_factors[0]) | (diff > self.ratio_factors[1]),
                 np.nan,
                 diff,
             )
@@ -500,8 +499,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
             # Ignore pairs with large difference
             diff = xr.where(
-                (diff < self.ratio_factors[0])
-                | (diff > self.ratio_factors[1]),
+                (diff < self.ratio_factors[0]) | (diff > self.ratio_factors[1]),
                 np.nan,
                 diff,
             )
