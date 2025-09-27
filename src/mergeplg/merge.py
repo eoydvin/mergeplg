@@ -196,8 +196,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         nnear=8,
         max_distance=60000,
         method="additive",
-        additive_factor=10,
-        multiplicative_factors=(0.1, 15),
+        difference_factor=10,
+        ratio_factors=(0.1, 15),
     ):
         """
         Initialize merging object.
@@ -227,12 +227,12 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
-        additive_factor: float
+        difference_factor: float
             Differences between radar and ground observations larger than
-            this threshold is ignored.
-        multiplicative_factors: list
+            this threshold is ignored if additive merging is used.
+        ratio_factors: list
             Ratios between radar and ground observations above and
-            below these two thresholds is ignored.
+            below these two thresholds is ignored if multiplicative merging is used.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -252,8 +252,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
-        self.additive_factor = additive_factor
-        self.multiplicative_factors = multiplicative_factors
+        self.difference_factor = difference_factor
+        self.ratio_factors = ratio_factors
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -299,7 +299,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
+            diff = np.where(np.abs(diff) < self.difference_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
@@ -308,8 +308,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
             # Ignore pairs with large difference
             diff = xr.where(
-                (diff < self.multiplicative_factors[0])
-                | (diff > self.multiplicative_factors[1]),
+                (diff < self.ratio_factors[0])
+                | (diff > self.ratio_factors[1]),
                 np.nan,
                 diff,
             )
@@ -373,8 +373,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         nnear=8,
         max_distance=60000,
         full_line=True,
-        additive_factor=10,
-        multiplicative_factors=(0.1, 15),
+        difference_factor=10,
+        ratio_factors=(0.1, 15),
     ):
         """
         Initialize merging object.
@@ -408,12 +408,12 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
-        additive_factor: float
+        difference_factor: float
             Differences between radar and ground observations larger than
-            this threshold is ignored.
-        multiplicative_factors: list
+            this threshold is ignored if additive merging is used.
+        ratio_factors: list
             Ratios between radar and ground observations above and
-            below these two thresholds is ignored.
+            below these two thresholds is ignored if multiplicative merging is used.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -435,8 +435,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
-        self.additive_factor = additive_factor
-        self.multiplicative_factors = multiplicative_factors
+        self.difference_factor = difference_factor
+        self.ratio_factors = ratio_factors
 
     def __call__(
         self,
@@ -491,7 +491,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
+            diff = np.where(np.abs(diff) < self.difference_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
@@ -500,8 +500,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
             # Ignore pairs with large difference
             diff = xr.where(
-                (diff < self.multiplicative_factors[0])
-                | (diff > self.multiplicative_factors[1]),
+                (diff < self.ratio_factors[0])
+                | (diff > self.ratio_factors[1]),
                 np.nan,
                 diff,
             )
@@ -553,7 +553,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         min_observations=1,
         nnear=8,
         max_distance=60000,
-        additive_factor=10,
+        ratio_factors=(0.1, 15),
     ):
         """
         Initialize merging object.
@@ -581,9 +581,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             Number of closest links to use for interpolation
         max_distance: float
             Largest distance allowed for including an observation.
-        additive_factor: float
-            Differences between radar and ground observations larger than
-            this threshold is ignored.
+        ratio_factors: list
+            Ratios between radar and ground observations above and
+            below these two thresholds is ignored.
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -604,7 +604,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
-        self.additive_factor = additive_factor
+        self.ratio_factors = ratio_factors
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -669,8 +669,17 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
         # Default decision on which observations to ignore
-        diff = np.abs(obs - rad) > self.additive_factor
-        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | diff
+        mask_zero = rad > 0.0
+        diff_nan = np.full_like(obs, np.nan, dtype=np.float32)
+        diff_nan[mask_zero] = obs[mask_zero] / rad[mask_zero]
+        diff_nan[mask_zero] = xr.where(
+            (diff_nan[mask_zero] < self.ratio_factors[0])
+            | (diff_nan[mask_zero] > self.ratio_factors[1]),
+            np.nan,
+            diff_nan[mask_zero]
+        )
+
+        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | np.isnan(diff_nan)
         obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
         # If few observations return radar
