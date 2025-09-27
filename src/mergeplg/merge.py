@@ -198,8 +198,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method="additive",
         additive_factor=10,
         multiplicative_factors=(0.1, 15),
-        radar_threshold = 0.01,
-        fill_radar = True,
+        radar_threshold=0.01,
+        fill_radar=True,
     ):
         """
         Initialize merging object.
@@ -290,7 +290,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             DataArray with the same coordinates as ds_rad but with the
             interpolated field.
         """
-
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
 
@@ -351,10 +350,14 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
-            adjusted = xr.where(da_rad_threshold > 0, interpolated + da_rad_threshold, 0)
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated + da_rad_threshold, 0
+            )
 
-        elif self.method == "multiplicative":
-            adjusted = xr.where(da_rad_threshold > 0, interpolated*da_rad_threshold, 0)
+        else:  # Multiplicative
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+            )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
@@ -398,8 +401,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line=True,
         additive_factor=10,
         multiplicative_factors=(0.1, 15),
-        radar_threshold = 0.01,
-        fill_radar = True,
+        radar_threshold=0.01,
+        fill_radar=True,
     ):
         """
         Initialize merging object.
@@ -507,7 +510,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             DataArray with the same structure as the ds_rad but with the
             interpolated field.
         """
-
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
 
@@ -559,10 +561,14 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
-            adjusted = xr.where(da_rad_threshold > 0, interpolated + da_rad_threshold, 0)
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated + da_rad_threshold, 0
+            )
 
-        elif self.method == "multiplicative":
-            adjusted = xr.where(da_rad_threshold > 0, interpolated*da_rad_threshold, 0)
+        else:  # Multiplicative
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+            )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
@@ -600,8 +606,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         nnear=8,
         max_distance=60000,
         additive_factor=10,
-        radar_threshold = 0.01,
-        fill_radar = True,
+        radar_threshold=0.01,
+        fill_radar=True,
     ):
         """
         Initialize merging object.
@@ -745,7 +751,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         ).reshape(self.x_grid.shape)
 
         # Set negative estimates and radar below threshold to zero, keeping nan
-        adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted) ] = 0
+        adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted)] = 0
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
