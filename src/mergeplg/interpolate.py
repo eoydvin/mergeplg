@@ -256,7 +256,7 @@ class InterpolateIDW(InterpolatorBase):
         # Grid specific information
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
 
-        # If few observations return zero grid
+        # If few observations return nan grid
         if (~np.isnan(observations)).sum() <= self.min_observations:
             da = xr.DataArray(
                 data=np.full_like(self.x_grid, np.nan),
