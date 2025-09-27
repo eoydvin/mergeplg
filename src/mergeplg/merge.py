@@ -199,7 +199,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         additive_factor=10,
         multiplicative_factors=(0.1, 15),
         radar_threshold = 0.01,
-        fill_radar = False,
+        fill_radar = True,
     ):
         """
         Initialize merging object.
@@ -399,7 +399,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         additive_factor=10,
         multiplicative_factors=(0.1, 15),
         radar_threshold = 0.01,
-        fill_radar = False,
+        fill_radar = True,
     ):
         """
         Initialize merging object.
@@ -601,7 +601,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         max_distance=60000,
         additive_factor=10,
         radar_threshold = 0.01,
-        fill_radar = False,
+        fill_radar = True,
     ):
         """
         Initialize merging object.
