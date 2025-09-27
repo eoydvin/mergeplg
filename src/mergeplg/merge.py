@@ -553,7 +553,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         min_observations=1,
         nnear=8,
         max_distance=60000,
-        ratio_factors=(0.1, 15),
+        difference_factor=10,
     ):
         """
         Initialize merging object.
@@ -581,9 +581,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             Number of closest links to use for interpolation
         max_distance: float
             Largest distance allowed for including an observation.
-        ratio_factors: list
-            Ratios between radar and ground observations above and
-            below these two thresholds is ignored.
+        difference_factor: float
+            Differences between radar and ground observations larger than
+            this threshold is ignored.
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -604,7 +604,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
-        self.ratio_factors = ratio_factors
+        self.difference_factor = difference_factor
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -669,17 +669,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
         # Default decision on which observations to ignore
-        mask_zero = rad > 0.0
-        diff_nan = np.full_like(obs, np.nan, dtype=np.float32)
-        diff_nan[mask_zero] = obs[mask_zero] / rad[mask_zero]
-        diff_nan[mask_zero] = xr.where(
-            (diff_nan[mask_zero] < self.ratio_factors[0])
-            | (diff_nan[mask_zero] > self.ratio_factors[1]),
-            np.nan,
-            diff_nan[mask_zero]
-        )
-
-        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | np.isnan(diff_nan)
+        diff = np.abs(obs - rad) > self.difference_factor
+        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | diff
         obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
         # If few observations return radar
