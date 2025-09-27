@@ -292,7 +292,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         obs = self._get_obs(da_cmls, da_gauges)
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
-        # If few observations return zero grid
+        # If few observations return radar grid
         if (~np.isnan(obs)).sum() <= self.min_observations:
             return da_rad
 
