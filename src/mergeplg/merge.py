@@ -175,12 +175,13 @@ class MergeBase:
                         stat="best",
                     )
 
-    def _apply_filter(self, obs, rad, filters):
+    def _apply_range_checks(self, obs, rad, range_checks):
         """
-        Apply filters to observations and radar data.
+        Apply range checks to observations and radar data.
 
-        Applies additive and/or multiplicative filters to ground (obs) and radar (rad)
-        observation pairs. Returns a numpy array of flagged data.
+        Applies additive and/or multiplicative range checks to ground (obs)
+        and radar (rad) observation pairs. Observations outside the ranges is
+        flagged.
 
         Parameters
         ----------
@@ -188,10 +189,10 @@ class MergeBase:
             Array with ground observations. The array has the same length as rad.
         rad : np.array
             Array with radar observations. The array has the same length as obs.
-        filters : dict
-            Dictionary with filters to apply. Keys can include:
-            - 'additive': float (threshold for additive differences)
-            - 'multiplicative': tuple (lower and upper bounds for ratios)
+        range_checks : dict
+            Dictionary with range checks to apply. Keys can include:
+            - 'diff_check': <limit>
+            - 'ratio_check': (<lower>, <upper>)
 
         Returns
         -------
@@ -201,14 +202,14 @@ class MergeBase:
         # Initialize flagged array as False for all values
         flagged = np.zeros_like(obs, dtype=bool)
 
-        # Apply additive filter (if specified)
-        if "diff_limit" in filters:
+        # Apply additive range checks (if specified)
+        if "diff_check" in range_checks:
             # Flag observations where the absolute difference exceeds the limit
-            flagged_add = np.abs(obs - rad) > filters["diff_limit"]
+            flagged_add = np.abs(obs - rad) > range_checks["diff_check"]
             flagged |= flagged_add  # Combine with existing flagged data
 
-        # Apply multiplicative filter (if specified)
-        if "ratio_range" in filters:
+        # Apply multiplicative range checks (if specified)
+        if "ratio_check" in range_checks:
             # Compute ratio, ignoring zero or negative radar values
             ratio = np.divide(
                 obs,
@@ -218,8 +219,8 @@ class MergeBase:
             )
 
             # Flag observations outside the specified ratio range
-            flagged_mult = (ratio < filters["ratio_range"][0]) | (
-                ratio > filters["ratio_range"][1]
+            flagged_mult = (ratio < range_checks["ratio_check"][0]) | (
+                ratio > range_checks["ratio_check"][1]
             )
             flagged |= flagged_mult  # Combine with existing flagged data
 
@@ -246,7 +247,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         nnear=8,
         max_distance=60000,
         method="additive",
-        filters="standard",
+        range_checks=None,
     ):
         """
         Initialize merging object.
@@ -276,15 +277,13 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
-        filters : str, dict, or None, optional
-            Specifies the filters to apply to the data:
-            - `"standard"`: Uses predefined thresholds for each merging method:
-                - For `"additive"`: Default difference limit is 10.
-                - For `"multiplicative"`: Default ratio range is (0.1, 15).
-            - `dict`: A dictionary of user-specified filters. Must follow the format:
-                - `{'diff_limit': <limit>, 'ratio_range': (<lower>, <upper>)}`.
-                - If empty dictionary is passed, no filter is applied.
-            Defaults to `"standard"`.
+        range_checks: dict
+            Specifies the range checks to apply to the data:
+                - For difference check: {'diff_check': <limit>}.
+                - For ratio check: {'ratio_check': (<lower>, <upper>)}.
+                - If None, no range checks are applied.
+            For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
+            applies a difference limit of 10 and a ratio range of 0.1 to 15.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -304,27 +303,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
-
-        # Set filter function
-        if filters == "standard":
-            if method == "additive":
-                filter_params = {"diff_limit": 10.0}
-            elif method == "multiplicative":
-                filter_params = {"ratio_range": (0.1, 15)}
-            else:
-                msg = "Method must be multiplicative or additive"
-                raise ValueError(msg)
-        elif isinstance(filters, dict):
-            filter_params = filters  # Use the provided dictionary
-        else:
-            msg = "Method must be multiplicative or additive"
-            raise ValueError(msg)
-
-        # Define the filter function
-        def filter_function(obs, rad):
-            return self._apply_filter(obs, rad, filter_params)
-
-        self.filter_function = filter_function
+        self.range_checks = {} if range_checks is None else range_checks
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -363,10 +342,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         obs = self._get_obs(da_cmls, da_gauges)
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
-        # If few observations return radar grid
-        if (~np.isnan(obs)).sum() <= self.min_observations:
-            return da_rad
-
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
@@ -380,8 +355,12 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             raise ValueError(msg)
 
         # Flag indices based on user defined thresholds
-        flagged_indices = self.filter_function(obs, rad)
-        diff[flagged_indices] = np.nan
+        flagged = self._apply_range_checks(obs, rad, self.range_checks)
+        diff[flagged] = np.nan  # ignored in interpolator
+
+        # If few observations return radar grid
+        if (~np.isnan(flagged)).sum() <= self.min_observations:
+            return da_rad
 
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
@@ -438,7 +417,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         nnear=8,
         max_distance=60000,
         full_line=True,
-        filters="standard",
+        range_checks=None,
     ):
         """
         Initialize merging object.
@@ -472,15 +451,13 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
-        filters : str, dict, or None, optional
-            Specifies the filters to apply to the data:
-            - `"standard"`: Uses predefined thresholds for each merging method:
-                - For `"additive"`: Default difference limit is 10.
-                - For `"multiplicative"`: Default ratio range is (0.1, 15).
-            - `dict`: A dictionary of user-specified filters. Must follow the format:
-                - `{'diff_limit': <limit>, 'ratio_range': (<lower>, <upper>)}`.
-                - If empty dictionary is passed, no filter is applied.
-            Defaults to `"standard"`.
+        range_checks: dict
+            Specifies the range checks to apply to the data:
+                - For difference check: {'diff_check': <limit>}.
+                - For ratio check: {'ratio_check': (<lower>, <upper>)}.
+                - If None, no range checks are applied.
+            For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
+            applies a difference limit of 10 and a ratio range of 0.1 to 15.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -502,27 +479,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
-
-        # Set filter function
-        if filters == "standard":
-            if method == "additive":
-                filter_params = {"diff_limit": 10.0}
-            elif method == "multiplicative":
-                filter_params = {"ratio_range": (0.1, 15)}
-            else:
-                msg = "Method must be multiplicative or additive"
-                raise ValueError(msg)
-        elif isinstance(filters, dict):
-            filter_params = filters  # Use the provided dictionary
-        else:
-            msg = "Method must be multiplicative or additive"
-            raise ValueError(msg)
-
-        # Define the filter function
-        def filter_function(obs, rad):
-            return self._apply_filter(obs, rad, filter_params)
-
-        self.filter_function = filter_function
+        self.range_checks = {} if range_checks is None else range_checks
 
     def __call__(
         self,
@@ -588,11 +545,11 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             raise ValueError(msg)
 
         # Flag indices based on user defined thresholds
-        flagged_indices = self.filter_function(obs, rad)
-        diff[flagged_indices] = np.nan
+        flagged = self._apply_range_checks(obs, rad, self.range_checks)
+        diff[flagged] = np.nan  # ignored in interpolator
 
         # If few observations return the radar grid
-        if (~np.isnan(obs)).sum() <= self.min_observations:
+        if (~np.isnan(diff)).sum() <= self.min_observations:
             return da_rad
 
         # Interpolate the difference
@@ -634,7 +591,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         min_observations=1,
         nnear=8,
         max_distance=60000,
-        filters="standard",
+        range_checks=None,
     ):
         """
         Initialize merging object.
@@ -662,13 +619,13 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             Number of closest links to use for interpolation
         max_distance: float
             Largest distance allowed for including an observation.
-        filters : str, dict, or None, optional
-            Specifies the filters to apply to the data:
-            - `"standard"`: Uses predefined difference limit of 10.
-            - `dict`: A dictionary of user-specified filters. Must follow the format:
-                - `{'diff_limit': <limit>, 'ratio_range': (<lower>, <upper>)}`.
-                - If empty dictionary is passed, no filter is applied.
-            Defaults to `"standard"`.
+        range_checks: dict
+            Specifies the range checks to apply to the data:
+                - For difference check: {'diff_check': <limit>}.
+                - For ratio check: {'ratio_check': (<lower>, <upper>)}.
+                - If None, no range checks are applied.
+            For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
+            applies a difference limit of 10 and a ratio range of 0.1 to 15.
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -689,21 +646,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
-
-        # Set filter function
-        if filters == "standard":
-            filter_params = {"diff_limit": 10.0}
-        elif isinstance(filters, dict):
-            filter_params = filters  # Use the provided dictionary
-        else:
-            msg = "Invalid filters argument. Must be 'standard' or a dictionary."
-            raise ValueError(msg)
-
-        # Define the filter function
-        def filter_function(obs, rad):
-            return self._apply_filter(obs, rad, filter_params)
-
-        self.filter_function = filter_function
+        self.range_checks = {} if range_checks is None else range_checks
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -768,8 +711,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         rad = self._get_rad(da_rad, da_cmls, da_gauges)
 
         # Flag indices based on user defined thresholds
-        flagged_indices = self.filter_function(obs, rad)
-        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | flagged_indices
+        flagged = self._apply_range_checks(obs, rad, self.range_checks)
+        ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | flagged
         obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
         # If few observations return radar
