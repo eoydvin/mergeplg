@@ -116,16 +116,12 @@ def test_multiplicative_additiveKriging():
         )
 
     # Check that invalid merger causes ValueError
-    merger = merge.MergeDifferenceOrdinaryKriging(
-        ds_rad=ds_rad,
-        ds_gauges=ds_gauges,
-        method="not_valid_method",
-    )
     msg = "Method must be multiplicative or additive"
     with pytest.raises(ValueError, match=msg):
-        merged = merger(
-            da_rad_t,
-            da_gauges=da_gauges_t1,
+        merger = merge.MergeDifferenceOrdinaryKriging(
+            ds_rad=ds_rad,
+            ds_gauges=ds_gauges,
+            method="not_valid_method",
         )
 
 
@@ -185,16 +181,12 @@ def test_multiplicative_additiveIDW():
         )
 
     # Check that invalid merger causes ValueError
-    merger = merge.MergeDifferenceIDW(
-        ds_rad=ds_rad,
-        ds_gauges=ds_gauges,
-        method="not_valid_method",
-    )
     msg = "Method must be multiplicative or additive"
     with pytest.raises(ValueError, match=msg):
-        merged = merger(
-            da_rad_t,
-            da_gauges=da_gauges_t1,
+        merger = merge.MergeDifferenceIDW(
+            ds_rad=ds_rad,
+            ds_gauges=ds_gauges,
+            method="not_valid_method",
         )
 
 
@@ -216,7 +208,7 @@ def test_obk_filter():
         nnear=8,
         min_observations=1,
         method="additive",
-        difference_factor=10,
+        filters={"diff_limit": 10.0},
     )
 
     # Adjust field
@@ -248,7 +240,7 @@ def test_obk_filter():
         nnear=8,
         min_observations=1,
         method="multiplicative",
-        ratio_factors=(0.1, 5),
+        filters={"ratio_range": (0.1, 5)},
     )
 
     # Adjust field
@@ -292,7 +284,7 @@ def test_idw_filter():
         nnear=8,
         min_observations=1,
         method="additive",
-        difference_factor=10,
+        filters={"diff_limit": 10.0},
     )
 
     # Adjust field
@@ -324,7 +316,7 @@ def test_idw_filter():
         nnear=8,
         min_observations=1,
         method="multiplicative",
-        ratio_factors=(0.1, 5),
+        filters={"ratio_range": (0.1, 5)},
     )
 
     # Adjust field
