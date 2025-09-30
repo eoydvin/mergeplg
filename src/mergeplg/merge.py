@@ -591,6 +591,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         min_observations=1,
         nnear=8,
         max_distance=60000,
+        full_line=True,
         range_checks=None,
     ):
         """
@@ -619,6 +620,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             Number of closest links to use for interpolation
         max_distance: float
             Largest distance allowed for including an observation.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -639,7 +643,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             min_observations=min_observations,
             nnear=nnear,
             max_distance=max_distance,
-            full_line=True,  # False not implemented for KED
+            full_line=full_line,
         )
 
         # Init weights update

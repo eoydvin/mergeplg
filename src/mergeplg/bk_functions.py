@@ -62,6 +62,9 @@ class OBKrigTree:
             Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -263,6 +266,7 @@ class BKEDTree:
         nnear=8,
         nnear_mult=2,
         max_distance=60000,
+        full_line=True,
     ):
         """Construct kriging matrices and block geometry.
 
@@ -291,6 +295,9 @@ class BKEDTree:
             Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -321,6 +328,10 @@ class BKEDTree:
                 .transpose("id", "yx", "disc")
                 .data
             )
+
+        # Force interpolator to use only midpoint
+        if full_line is False:
+            x0 = x0[:, :, [int(x0.shape[2] / 2)]]
 
         # Number of observations
         n_obs = x0.shape[0]
