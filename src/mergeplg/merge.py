@@ -662,6 +662,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             discretization=self.discretization,
             nnear=self.nnear,
             max_distance=self.max_distance,
+            full_line=self.full_line,
         )
 
     def __call__(
