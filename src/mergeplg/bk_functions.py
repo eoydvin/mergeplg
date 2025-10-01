@@ -478,9 +478,8 @@ class BKEDTree:
 
             # If all radar observations are the same
             if (mat[-1, ind] == mat[-1, ind[0]]).all():
-                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])[
-                    :-1
-                ]
+                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
+                w = w[:-1]
             else:
                 # Solve the kriging system
                 w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
