@@ -62,6 +62,9 @@ class OBKrigTree:
             Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -263,6 +266,7 @@ class BKEDTree:
         nnear=8,
         nnear_mult=2,
         max_distance=60000,
+        full_line=True,
     ):
         """Construct kriging matrices and block geometry.
 
@@ -291,6 +295,9 @@ class BKEDTree:
             Ensures that more of the nearby observations will be not nan.
         max_distance: float
             Max distance for including observation in neighbourhood.
+        full_line: bool
+            Whether to use the full line for block kriging. If set to false, the
+            x0 geometry is reformatted to simply reflect the midpoint of the CML.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -321,6 +328,10 @@ class BKEDTree:
                 .transpose("id", "yx", "disc")
                 .data
             )
+
+        # Force interpolator to use only midpoint
+        if full_line is False:
+            x0 = x0[:, :, [int(x0.shape[2] / 2)]]
 
         # Number of observations
         n_obs = x0.shape[0]
@@ -456,10 +467,6 @@ class BKEDTree:
             # Remove indices equal to n_obs, select the first nnear.
             ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
 
-            # If all radar observations are the same
-            if (mat[-1, ind] == mat[-1, ind[0]]).all():
-                continue
-
             # Subtract withinblock covariance of the blocks.
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
@@ -469,8 +476,13 @@ class BKEDTree:
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, [self.n_obs, self.n_obs + 1])
 
-            # Solve the kriging system
-            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
+            # If all radar observations are the same, this defaults to OK
+            if (mat[-1, ind] == mat[-1, ind[0]]).all():
+                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
+                w = w[:-1]
+            else:
+                # Solve the kriging system
+                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
