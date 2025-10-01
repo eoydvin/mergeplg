@@ -214,7 +214,7 @@ class OBKrigTree:
         var_line_point = self.var_line_point[~mask]
 
         # array for storing CML-radar merge
-        est_with_nan = np.zeros(self.ixs.shape[0])
+        est_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
@@ -459,7 +459,7 @@ class BKEDTree:
         rad_field = rad_field[~mask]
 
         # array for storing CML-radar merge
-        est_with_nan = np.zeros(self.ixs.shape[0])
+        est_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
         estimate = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid

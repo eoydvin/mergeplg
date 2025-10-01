@@ -247,6 +247,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         nnear=8,
         max_distance=60000,
         method="additive",
+        radar_threshold=0.01,
+        fill_radar=True,
         range_checks=None,
     ):
         """
@@ -277,6 +279,12 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
+        fill_radar: bool
+            If True fill cells beyond max_distance from observations with
+            radar observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -303,6 +311,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
+        self.radar_threshold = radar_threshold
+        self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
@@ -330,6 +340,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             DataArray with the same coordinates as ds_rad but with the
             interpolated field.
         """
+        # Set cells where radar is low/zero to zero
+        da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
+
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(
             self.y_grid, self.x_grid, da_cmls, da_gauges
@@ -340,7 +353,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Get observations and radar for current time step
         obs = self._get_obs(da_cmls, da_gauges)
-        rad = self._get_rad(da_rad, da_cmls, da_gauges)
+        rad = self._get_rad(da_rad_threshold, da_cmls, da_gauges)
 
         # Calculate radar-ground difference
         if self.method == "additive":
@@ -350,6 +363,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+
         else:
             msg = "Method must be multiplicative or additive"
             raise ValueError(msg)
@@ -379,13 +393,26 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
 
-        # Adjust radar field
+        # Adjust radar field where radar is larger than zero
         if self.method == "additive":
-            adjusted = interpolated + da_rad
-            adjusted.data[adjusted < 0] = 0
-        elif self.method == "multiplicative":
-            adjusted = interpolated * da_rad
-            adjusted.data[adjusted < 0] = 0
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated + da_rad_threshold, 0
+            )
+
+        else:  # Multiplicative
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+            )
+
+        # Set negative rainfall estimates to zero
+        adjusted = adjusted.where(adjusted >= 0, 0)
+
+        # Set gridcells beyond max_distance to nan
+        adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Fill radar to gridcells beyond max_distance
+        if self.fill_radar:
+            adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
         da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
@@ -417,6 +444,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         nnear=8,
         max_distance=60000,
         full_line=True,
+        radar_threshold=0.01,
+        fill_radar=True,
         range_checks=None,
     ):
         """
@@ -451,6 +480,12 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
+        fill_radar: bool
+            If True fill cells beyond max_distance from observations with
+            radar observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -479,6 +514,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
+        self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 
     def __call__(
@@ -517,6 +554,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             DataArray with the same structure as the ds_rad but with the
             interpolated field.
         """
+        # Set cells where radar is low/zero to zero
+        da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
+
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(
             self.y_grid, self.x_grid, da_cmls, da_gauges
@@ -529,7 +569,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         obs, sigma = self._get_obs_sigma(
             da_cmls, da_gauges, da_cmls_sigma, da_gauges_sigma
         )
-        rad = self._get_rad(da_rad, da_cmls, da_gauges)
+        rad = self._get_rad(da_rad_threshold, da_cmls, da_gauges)
 
         # Calculate radar-ground difference
         if self.method == "additive":
@@ -537,7 +577,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
-            diff = np.full_like(obs, np.nan, dtype=np.float64)
+            diff = np.full_like(obs, np.nan, dtype=np.float32)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
 
         else:
@@ -558,13 +598,26 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
 
-        # Adjust radar field
+        # Adjust radar field where radar is larger than zero
         if self.method == "additive":
-            adjusted = interpolated + da_rad
-            adjusted.data[adjusted < 0] = 0
-        elif self.method == "multiplicative":
-            adjusted = interpolated * da_rad
-            adjusted.data[adjusted < 0] = 0
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated + da_rad_threshold, 0
+            )
+
+        else:  # Multiplicative
+            adjusted = xr.where(
+                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+            )
+
+        # Set negative rainfall estimates to zero
+        adjusted = adjusted.where(adjusted >= 0, 0)
+
+        # Set gridcells beyond max_distance to nan
+        adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Fill radar to gridcells beyond max_distance
+        if self.fill_radar:
+            adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
         da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
@@ -592,6 +645,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         nnear=8,
         max_distance=60000,
         full_line=True,
+        radar_threshold=0.01,
+        fill_radar=True,
         range_checks=None,
     ):
         """
@@ -623,6 +678,12 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
+        fill_radar: bool
+            If True fill cells beyond max_distance from observations with
+            radar observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -650,6 +711,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
+        self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
@@ -701,6 +764,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             DataArray with the same structure as the ds_rad but with the
             interpolated field.
         """
+        # Set cells where radar is low/zero to zero
+        da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
+
         # Get updated interpolator object
         self._interpolator = self._maybe_update_interpolator(
             self.y_grid, self.x_grid, da_cmls, da_gauges
@@ -713,7 +779,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         obs, sigma = self._get_obs_sigma(
             da_cmls, da_gauges, da_cmls_sigma, da_gauges_sigma
         )
-        rad = self._get_rad(da_rad, da_cmls, da_gauges)
+        rad = self._get_rad(da_rad_threshold, da_cmls, da_gauges)
 
         # Flag indices based on user defined thresholds
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
@@ -724,20 +790,20 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         if (~np.isnan(obs)).sum() <= self.min_observations:
             return da_rad
 
-        # Set zero values to nan, these are ignored in interpolator
-        rad_field = da_rad.data
-        rad_field[rad_field <= 0] = np.nan
-
         # KED merging
         adjusted = self._interpolator(
-            rad_field.ravel(),
+            da_rad_threshold.data.ravel(),
             obs,
             rad,
             sigma,
         ).reshape(self.x_grid.shape)
 
-        # Remove negative values
-        adjusted[(adjusted < 0) | np.isnan(adjusted)] = 0
+        # Set negative estimates and radar below threshold to zero, keeping nan
+        adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted)] = 0
+
+        # Fill radar to gridcells beyond max_distance
+        if self.fill_radar:
+            adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
         da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
         da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
