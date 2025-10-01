@@ -55,6 +55,33 @@ ds_rad = xr.Dataset(
     },
 )
 
+def test_max_distance():
+    # Rain gauge
+    da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Additive
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        full_line=False,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        method="additive",
+        max_distance=3,
+        fill_radar=False
+    )
+
+    # Test that providing only RG works
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+
+    # Gauges located at (1, 1) and (0, 1) are within all cells
+    # (by 2 units) for all gridcells, except the lower row y=-1
+    assert np.isnan(merged.isel(y = 0).data).all()
 
 def test_multiplicative_additiveKriging():
     # CML and rain gauge not overlapping sets
