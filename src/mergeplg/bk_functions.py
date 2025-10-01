@@ -476,7 +476,7 @@ class BKEDTree:
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, [self.n_obs, self.n_obs + 1])
 
-            # If all radar observations are the same
+            # If all radar observations are the same, this defaults to OK
             if (mat[-1, ind] == mat[-1, ind[0]]).all():
                 w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
                 w = w[:-1]
