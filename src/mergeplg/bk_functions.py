@@ -467,10 +467,6 @@ class BKEDTree:
             # Remove indices equal to n_obs, select the first nnear.
             ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
 
-            # If all radar observations are the same
-            if (mat[-1, ind] == mat[-1, ind[0]]).all():
-                continue
-
             # Subtract withinblock covariance of the blocks.
             target = -1 * (var_line_point[i, ind] - self.var_within[ind])
 
@@ -480,8 +476,14 @@ class BKEDTree:
             # Append the non-bias indices to krigin matrix lookup
             i_mat = np.append(ind, [self.n_obs, self.n_obs + 1])
 
-            # Solve the kriging system
-            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
+            # If all radar observations are the same
+            if (mat[-1, ind] == mat[-1, ind[0]]).all():
+                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])[
+                    :-1
+                ]
+            else:
+                # Solve the kriging system
+                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w

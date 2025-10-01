@@ -5,7 +5,7 @@ import pykrige
 import pytest
 import xarray as xr
 
-from mergeplg import interpolate
+from mergeplg import interpolate, merge
 
 ds_cmls = xr.Dataset(
     data_vars={
@@ -249,6 +249,125 @@ def test_no_data():
         interpolator(
             da_cmls=ds_cml_t1_2.R,
         )
+
+
+def test_kedpoint_vs_pykrige():
+    # Select rain gauges
+    da_gauges_t = ds_gauges.isel(id=[0, 1, 2], time=1).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=1).R
+    da_rad_t.data = np.array(
+        [
+            [1.0, 3.0, 3.0, 3.0],
+            [2.0, 3.0, 4.0, 4.0],
+            [4.0, 3.0, 4.0, 5.0],
+            [4.0, 4.0, 6.0, 6.0],
+        ]
+    )
+
+    variogram_model = "exponential"
+    variogram_parameters = {"sill": 1, "range": 2, "nugget": 0}
+
+    # Initialize highlevel-class
+    interpolate_ked = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        nnear=12,
+        min_observations=1,
+        full_line=False,
+    )
+
+    # Interpolate field
+    interp_field = interpolate_ked(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t,
+    )
+
+    # Setup pykrige
+    ked = pykrige.UniversalKriging(
+        da_gauges_t.x.data.ravel(),
+        da_gauges_t.y.data.ravel(),
+        da_gauges_t.data.ravel(),
+        drift_terms=["external_Z"],
+        external_drift=da_rad_t.data,
+        external_drift_x=da_rad_t.x.data.ravel(),
+        external_drift_y=da_rad_t.y.data.ravel(),
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        pseudo_inv=True,
+        exact_values=False,  # Account for nugget when predicting
+    )
+
+    z, ss = ked.execute(
+        "points",
+        da_rad_t.x_grid.data.ravel().astype(float),
+        da_rad_t.y_grid.data.ravel().astype(float),
+    )
+
+    interp_field_pykrige = z.reshape(da_rad_t.x_grid.shape)
+    np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
+
+
+def test_kedpoint_vs_pykrige_radarisone():
+    # In this example the external drift term is all ones, causing the
+    # interpolator to default to ordinary kriging.
+
+    # Select rain gauges
+    da_gauges_t = ds_gauges.isel(id=[0, 1, 2], time=1).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=1).R
+
+    variogram_model = "exponential"
+    variogram_parameters = {"sill": 1, "range": 2, "nugget": 0.5}
+
+    # Initialize highlevel-class
+    interpolate_ked = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        nnear=12,
+        min_observations=1,
+        full_line=False,
+    )
+
+    # Interpolate field
+    interp_field = interpolate_ked(
+        da_rad=da_rad_t,
+        da_gauges=da_gauges_t,
+    )
+
+    # Get value at gauges
+    rad = da_rad_t.sel(x=da_gauges_t.x, y=da_gauges_t.y).data
+
+    # Setup pykrige using midpoint of CMLs as reference
+    ok = pykrige.UniversalKriging(
+        da_gauges_t.x.data.ravel(),
+        da_gauges_t.y.data.ravel(),
+        da_gauges_t.data.ravel(),
+        specified_drift=rad.ravel(),
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        pseudo_inv=True,
+        exact_values=False,  # Account for nugget when predicting
+    )
+
+    z, ss = ok.execute(
+        "points",
+        da_rad_t.x_grid.data.ravel().astype(float),
+        da_rad_t.y_grid.data.ravel().astype(float),
+    )
+
+    interp_field_pykrige = z.reshape(da_rad_t.x_grid.shape)
+
+    print(interp_field)
+    print(interp_field_pykrige)
+
+    np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
 
 
 def test_blockkriging_vs_pykrige():
