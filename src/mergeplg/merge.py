@@ -247,6 +247,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         nnear=8,
         max_distance=60000,
         method="additive",
+        radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
     ):
@@ -278,6 +279,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
             radar observations.
@@ -307,6 +311,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, da_cml=ds_cmls, da_gauge=ds_gauges)
+        self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 
@@ -353,20 +358,11 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float64)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
-
-            # Ignore pairs with large difference
-            diff = xr.where(
-                (diff < self.multiplicative_factors[0])
-                | (diff > self.multiplicative_factors[1]),
-                np.nan,
-                diff,
-            )
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -448,6 +444,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         nnear=8,
         max_distance=60000,
         full_line=True,
+        radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
     ):
@@ -483,6 +480,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
             radar observations.
@@ -514,6 +514,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.grid_location_radar = grid_location_radar
         self.method = method
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 
@@ -573,20 +574,11 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Calculate radar-ground difference
         if self.method == "additive":
             diff = np.where(rad > 0, obs - rad, np.nan)
-            diff = np.where(np.abs(diff) < self.additive_factor, diff, np.nan)
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float32)
             diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
-
-            # Ignore pairs with large difference
-            diff = xr.where(
-                (diff < self.multiplicative_factors[0])
-                | (diff > self.multiplicative_factors[1]),
-                np.nan,
-                diff,
-            )
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -653,6 +645,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         nnear=8,
         max_distance=60000,
         full_line=True,
+        radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
     ):
@@ -685,6 +678,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
             radar observations.
@@ -715,6 +711,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         MergeBase.__init__(self)
         self.grid_location_radar = grid_location_radar
         self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
 

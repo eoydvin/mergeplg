@@ -216,11 +216,7 @@ def test_obk_filter():
         nnear=8,
         min_observations=1,
         method="additive",
-<<<<<<< HEAD
-        additive_factor=10,
-=======
         range_checks={"diff_check": 10.0},
->>>>>>> upstream/main
     )
 
     # Adjust field
@@ -252,11 +248,7 @@ def test_obk_filter():
         nnear=8,
         min_observations=1,
         method="multiplicative",
-<<<<<<< HEAD
-        additive_factor=10,
-=======
         range_checks={"ratio_check": (0.1, 15)},
->>>>>>> upstream/main
     )
 
     # Adjust field
@@ -300,11 +292,7 @@ def test_idw_filter():
         nnear=8,
         min_observations=1,
         method="additive",
-<<<<<<< HEAD
-        additive_factor=10,
-=======
         range_checks={"diff_check": 10.0},
->>>>>>> upstream/main
     )
 
     # Adjust field
@@ -336,11 +324,7 @@ def test_idw_filter():
         nnear=8,
         min_observations=1,
         method="multiplicative",
-<<<<<<< HEAD
-        additive_factor=10,
-=======
         range_checks={"ratio_check": (0.1, 15)},
->>>>>>> upstream/main
     )
 
     # Adjust field
