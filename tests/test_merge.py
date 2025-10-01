@@ -69,7 +69,7 @@ def test_max_distance():
         full_line=False,
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
         method="additive",
-        max_distance=3,
+        max_distance=2,
         fill_radar=False
     )
 
