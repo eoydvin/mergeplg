@@ -389,15 +389,16 @@ class BKEDTree:
         # Set out of range observations to nobs
         ixs[out_of_range_mask] = n_obs
 
-        # Vectorized difference estimate
-        y_reshaped = ygrid[:, np.newaxis, np.newaxis]
-        x_reshaped = xgrid[:, np.newaxis, np.newaxis]
-        delta_y = x0[:, 0, :] - y_reshaped
-        delta_x = x0[:, 1, :] - x_reshaped
-        lengths = np.sqrt(delta_x**2 + delta_y**2)
-
-        # Estimate expected variance for all links
-        var_line_point = variogram(lengths).mean(axis=2)
+        # Compute variance from obs to all grid cells
+        var_line_point = np.zeros([xgrid.size, n_obs])
+        y_reshaped = ygrid[:, np.newaxis]
+        x_reshaped = xgrid[:, np.newaxis]
+        for i in range(n_obs):
+            # y distance from obs i to all gridpoints
+            delta_y = x0[i, 0, :] - y_reshaped
+            delta_x = x0[i, 1, :] - x_reshaped
+            lengths = np.sqrt(delta_x**2 + delta_y**2)
+            var_line_point[:, i] = variogram(lengths).mean(axis=1)
 
         # Store data to self
         self.mat = mat
