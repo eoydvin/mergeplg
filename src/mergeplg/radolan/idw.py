@@ -93,6 +93,7 @@ class Invdisttree:
         q,
         z,
         nnear=6,
+        nnear_mult=2,
         eps=0,
         p=1,
         idw_method="standard",
@@ -108,6 +109,9 @@ class Invdisttree:
             _description_
         nnear : int, optional
             _description_, by default 6
+        nnear_mult : float
+            Multiplied by nnear to find more nearby stations,
+            letting nan obs be ignored.
         eps : int, optional
             _description_, by default 0
         p : int, optional
@@ -165,7 +169,7 @@ class Invdisttree:
             pass
         else:
             self.distances, self.ix = self.tree.query(
-                q, k=nnear, eps=eps, distance_upper_bound=max_distance
+                q, k=nnear * nnear_mult, eps=eps, distance_upper_bound=max_distance
             )
             self.q = q
             self.nnear = nnear
@@ -189,6 +193,7 @@ class Invdisttree:
                 z=self.z,
                 z_shape=z[0].shape,
                 p=p,
+                nnear=nnear,
             )
         elif idw_method == "radolan":
             interpol = _numba_idw_loop_radolan(
@@ -197,6 +202,7 @@ class Invdisttree:
                 z=self.z,
                 z_shape=z[0].shape,
                 suchradius=max_distance,
+                nnear=nnear,
             )
         else:
             msg = f"IDW method {idw_method} not supported"
@@ -206,7 +212,7 @@ class Invdisttree:
 
 
 @jit(nopython=True)
-def _numba_idw_loop(distances, ixs, z, z_shape, p):  # pragma: no cover
+def _numba_idw_loop(distances, ixs, z, z_shape, p, nnear):  # pragma: no cover
     interpol = np.zeros((len(distances),) + z_shape)  # noqa: RUF005
     jinterpol = 0
     for i in range(len(distances)):
@@ -215,8 +221,8 @@ def _numba_idw_loop(distances, ixs, z, z_shape, p):  # pragma: no cover
 
         # drop entries where ix item == z, which is how KDTree.query indicates
         # missing neighbours
-        dist = dist[ix < len(z)]
-        ix = ix[ix < len(z)]
+        dist = dist[ix < len(z)][:nnear]
+        ix = ix[ix < len(z)][:nnear]
 
         if len(ix) == 0:
             wz = np.nan
@@ -234,7 +240,9 @@ def _numba_idw_loop(distances, ixs, z, z_shape, p):  # pragma: no cover
 
 
 @jit(nopython=True)
-def _numba_idw_loop_radolan(distances, ixs, z, z_shape, suchradius):  # pragma: no cover
+def _numba_idw_loop_radolan(
+    distances, ixs, z, z_shape, suchradius, nnear
+):  # pragma: no cover
     # For RADOLAN interpolation
     a = np.log(0.5) * 20 / suchradius
 
@@ -246,8 +254,8 @@ def _numba_idw_loop_radolan(distances, ixs, z, z_shape, suchradius):  # pragma: 
 
         # drop entries where ix item == z, which is how KDTree.query indicates
         # missing neighbours
-        dist = dist[ix < len(z)]
-        ix = ix[ix < len(z)]
+        dist = dist[ix < len(z)][:nnear]
+        ix = ix[ix < len(z)][:nnear]
 
         if len(ix) == 0:
             wz = np.nan
