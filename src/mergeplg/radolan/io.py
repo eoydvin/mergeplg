@@ -23,9 +23,9 @@ def transform_openmrg_data_for_old_radolan_code(ds_cmls):
         The CML data as DataFrame
 
     """
-    df_cmls = ds_cmls.to_dataframe().swaplevel()
-    df_cmls["station_id"] = df_cmls.index.get_level_values(1)
-    df_cmls.index = df_cmls.index.droplevel(1)
+    df_cmls = ds_cmls.to_dataframe().sort_index(level=["time", "cml_id"])
+    df_cmls["station_id"] = df_cmls.index.get_level_values("cml_id")
+    df_cmls.index = df_cmls.index.droplevel("cml_id")
     df_cmls["sensor_type"] = "cml_ericsson"
     df_cmls["rainfall_amount"] = df_cmls.R
     return df_cmls

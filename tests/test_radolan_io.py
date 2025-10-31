@@ -16,16 +16,17 @@ def test_transform_openmrg_data_for_old_radolan_code():
     assert df_cmls.sensor_type.iloc[0] == "cml_ericsson"
 
     npt.assert_equal(
-        df_cmls.station_id.iloc[30:32].to_numpy(), np.array([10001, 10002])
+        df_cmls.station_id.iloc[30:32].to_numpy(), np.array([10031, 10032])
     )
 
     npt.assert_equal(
-        df_cmls.index[:3].to_numpy(),
+        df_cmls.index[357:361].to_numpy(),
         np.array(
             [
                 "2015-07-25T12:30:00.00000000",
-                "2015-07-25T12:35:00.000000000",
-                "2015-07-25T12:40:00.000000000",
+                "2015-07-25T12:30:00.00000000",
+                "2015-07-25T12:35:00.00000000",
+                "2015-07-25T12:35:00.00000000",
             ],
             dtype="datetime64[ns]",
         ),

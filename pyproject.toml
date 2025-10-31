@@ -43,12 +43,13 @@ poligrain = ">=0.3.0"
 scipy = ">=1.14.0"
 numpy = ">=2.0.1"
 pandas = ">=2.2.2"
-xarray = ">=2024.6.0,<2024.9.0"
+xarray = ">=2024.6.0"
+netcdf4 = "<1.7.3"
+h5py = "<=3.14"
 wradlib = ">=2.0.3"
 scikit-learn = ">=1.5.1"
 scikit-gstat = ">=1.0.17"
 numba = "*"
-xarray-datatree = "<=0.0.14"
 
 [tool.poetry.dev-dependencies]
 pytest = ">= 6"
@@ -90,7 +91,10 @@ filterwarnings = [
   "error",
   # TODO: Remove the line below once the problem is fixed upstream,
   # see https://github.com/OpenSenseAction/poligrain/pull/69
-  "ignore::DeprecationWarning:xarray.core.common:157",
+  #"ignore::DeprecationWarning:xarray.core.common:157",
+  # Comment: Now ignoring all deprecation warning. This should of course
+  # be removed at some point...
+  "ignore::DeprecationWarning",
 ]
 log_cli_level = "INFO"
 testpaths = [
