@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import poligrain as plg
 import pytest
 import xarray as xr
 
@@ -479,337 +478,245 @@ def test_MergeDifferenceIDW():
 
 def test_MergeDifferenceOrdinaryKriging():
     # CML and rain gauge overlapping sets
-    da_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=0).R
-    da_cml_t2 = ds_cmls.isel(cml_id=[1, 0], time=0).R
-    da_gauges_t1 = ds_gauges.isel(id=[2, 1], time=0).R
-    da_gauges_t2 = ds_gauges.isel(id=[1, 0], time=0).R
+    ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1], time=0)
+    ds_cmls_t2 = ds_cmls.isel(cml_id=[2, 1], time=0)
+    ds_gauges_t2 = ds_gauges.isel(id=[2], time=0)
 
     # Select radar timestep
-    da_rad_t = ds_rad.isel(time=0).R
+    ds_rad_t = ds_rad.isel(time=0)
 
     # Initialize highlevel-class
     merger = merge.MergeDifferenceOrdinaryKriging(
-        ds_rad=ds_rad,
-        ds_cmls=ds_cmls,
-        ds_gauges=ds_gauges,
+        ds_rad=ds_rad_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
         nnear=8,
-        min_observations=2,
+        min_observations=1,
         method="additive",
-        discretization=8,
-        variogram_parameters={"sill": 1, "range": 1, "nugget": 0.1},
+        discretization=40,
+        variogram_model="spherical",
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
     )
 
     # Adjust field
     adjusted = merger(
-        da_rad=da_rad_t,
-        da_cmls=da_cml_t1,
-        da_gauges=da_gauges_t1,
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
     )
 
     # Test that CML names is correctly updated and sorted in the class
-    assert (merger.intersect_weights.cml_id == da_cml_t1.cml_id).all()
+    assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
 
     # Test that cml midpoint and end coordinates corresponds to x0_cml
-    assert (merger.x_0_cml == da_cml_t1.site_0_x).all()
-    assert (merger.x_1_cml == da_cml_t1.site_1_x).all()
-    assert (merger.y_0_cml == da_cml_t1.site_0_y).all()
-    assert (merger.y_1_cml == da_cml_t1.site_1_y).all()
+    assert (merger.x_0_cml == ds_cmls_t.site_0_x).all()
+    assert (merger.x_1_cml == ds_cmls_t.site_1_x).all()
+    assert (merger.y_0_cml == ds_cmls_t.site_0_y).all()
+    assert (merger.y_1_cml == ds_cmls_t.site_1_y).all()
 
     # Test that gauge midpoint coordinates corresponds to x0_gauge
-    assert (merger.x_gauge == da_gauges_t1.x).all()
-    assert (merger.y_gauge == da_gauges_t1.y).all()
+    assert (merger.x_gauge == ds_gauges_t.x).all()
+    assert (merger.y_gauge == ds_gauges_t.y).all()
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [7.0564348, 5.7576878, 6.8637781, 7.0564348],
-            [7.0564348, 6.8637781, 5.4636964, 8.1919296],
-            [7.0564348, 5.2825001, 8.6940564, 5.9547064],
-            [7.0564348, 8.3845863, 7.2534534, 8.8627983],
+            [2.7079736, 2.9399488, 3.0, 3.0],
+            [2.9399488, 2.4661924, 2.9399488, 3.0],
+            [3.0, 5.0, 2.7079736, 3.0],
+            [3.0, 3.0, 3.0, 3.0],
         ]
     )
 
     np.testing.assert_almost_equal(adjusted, data_check)
 
-    # calculate the adjusted field along CMLs
-    intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t1.site_0_x.data,
-        y1_line=da_cml_t1.site_0_y.data,
-        x2_line=da_cml_t1.site_1_x.data,
-        y2_line=da_cml_t1.site_1_y.data,
-        cml_id=da_cml_t1.cml_id.data,
-        x_grid=adjusted.x_grid.data,
-        y_grid=adjusted.y_grid.data,
-        grid_point_location="center",
-    )
-    adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
-        intersect_weights=intersect_weights,
-    )
-
-    # As the block kriging adjustment uses the variogram to fit the rainfall field,
-    # the get_grid_time_series_at_intersections uses the grid intersections and
-    # the grid is discretized, the adjusted radar along will not perfectly fit the
-    # CML observation. Thus we only test up to a certain decimal place.
-
-    np.testing.assert_almost_equal(
-        adjusted_at_cmls.data.ravel(),
-        da_cml_t1.data.ravel(),
-        decimal=0,  # not very precise, but decent
-    )
+    # Long CMLs average large areas; under stationarity, they
+    # observe the mean with uncertainty. The field need not
+    # match the CML exactly, so we skip path-wise agreement tests.
 
     # Test adjusted field at rain gauges
-    for gauge_id in da_gauges_t1.id:
+    for gauge_id in ds_gauges_t.id:
         merge_r = adjusted.sel(
-            x=da_gauges_t1.sel(id=gauge_id).x.data,
-            y=da_gauges_t1.sel(id=gauge_id).y.data,
+            x=ds_gauges_t.sel(id=gauge_id).x.data,
+            y=ds_gauges_t.sel(id=gauge_id).y.data,
         ).data
-        gauge_r = da_gauges_t1.sel(id=gauge_id).data
-        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=0)
+        gauge_r = ds_gauges_t.sel(id=gauge_id).R.data
+        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=8)
 
     # Adjust field
     adjusted = merger(
-        da_rad=da_rad_t,
-        da_cmls=da_cml_t2,
-        da_gauges=da_gauges_t2,
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t2.R,
+        da_gauges=ds_gauges_t2.R,
     )
 
     # Test that CML names is correctly updated and sorted in the class
-    assert (merger.intersect_weights.cml_id == da_cml_t2.cml_id).all()
+    assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()
 
     # Test that cml midpoint and end coordinates corresponds to x0_cml
-    assert (merger.x_0_cml == da_cml_t2.site_0_x).all()
-    assert (merger.x_1_cml == da_cml_t2.site_1_x).all()
-    assert (merger.y_0_cml == da_cml_t2.site_0_y).all()
-    assert (merger.y_1_cml == da_cml_t2.site_1_y).all()
+    assert (merger.x_0_cml == ds_cmls_t2.site_0_x).all()
+    assert (merger.x_1_cml == ds_cmls_t2.site_1_x).all()
+    assert (merger.y_0_cml == ds_cmls_t2.site_0_y).all()
+    assert (merger.y_1_cml == ds_cmls_t2.site_1_y).all()
 
     # Test that gauge midpoint coordinates corresponds to x0_gauge
-    assert (merger.x_gauge == da_gauges_t2.x).all()
-    assert (merger.y_gauge == da_gauges_t2.y).all()
+    assert (merger.x_gauge == ds_gauges_t2.x).all()
+    assert (merger.y_gauge == ds_gauges_t2.y).all()
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [1.8034557, 3.807717, 3.1030118, 2.9506274],
-            [2.7804554, 1.5221354, 4.1960881, 3.1030118],
-            [2.9506274, 4.5449719, 0.8625104, 3.977889],
-            [2.9506274, 2.9506274, 2.9506274, 2.9506274],
+            [7.6986128, 7.3003201, 7.6167094, 7.6986128],
+            [7.6986128, 7.6167094, 7.0145239, 7.8305215],
+            [7.6986128, 7.7425803, 8.0075458, 7.3442876],
+            [7.6986128, 7.9124249, 7.7425803, 9.0],
         ]
     )
 
     np.testing.assert_almost_equal(adjusted, data_check)
 
-    # calculate the adjusted field along CMLs
-    intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t2.site_0_x.data,
-        y1_line=da_cml_t2.site_0_y.data,
-        x2_line=da_cml_t2.site_1_x.data,
-        y2_line=da_cml_t2.site_1_y.data,
-        cml_id=da_cml_t2.cml_id.data,
-        x_grid=adjusted.x_grid.data,
-        y_grid=adjusted.y_grid.data,
-        grid_point_location="center",
-    )
-    adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
-        intersect_weights=intersect_weights,
-    )
-
-    # As the block kriging adjustment uses the variogram to fit the rainfall field,
-    # the get_grid_time_series_at_intersections uses the grid intersections and
-    # the grid is discretized, the adjusted radar along will not perfectly fit the
-    # CML observation. Thus we only test up to a certain decimal place.
-    np.testing.assert_almost_equal(
-        adjusted_at_cmls.data.ravel(),
-        da_cml_t2.data.ravel(),
-        decimal=0,  # not very precise, but decent
-    )
-
     # Test adjusted field at rain gauges
-    for gauge_id in da_gauges_t2.id:
+    for gauge_id in ds_gauges_t2.id:
         merge_r = adjusted.sel(
-            x=da_gauges_t2.sel(id=gauge_id).x.data,
-            y=da_gauges_t2.sel(id=gauge_id).y.data,
+            x=ds_gauges_t2.sel(id=gauge_id).x.data,
+            y=ds_gauges_t2.sel(id=gauge_id).y.data,
         ).data
-        gauge_r = da_gauges_t2.sel(id=gauge_id).data
+        gauge_r = ds_gauges_t2.sel(id=gauge_id).R.data
         np.testing.assert_almost_equal(
             merge_r,
             gauge_r,
-            decimal=0,  # not very precise, but decent
+            decimal=8,  # not very precise, but decent
         )
 
 
 def test_MergeBlockKrigingExternalDrift():
     # CML and rain gauge overlapping sets
-    da_cml_t1 = ds_cmls.isel(cml_id=[2, 1], time=0).R
-    da_cml_t2 = ds_cmls.isel(cml_id=[1, 0], time=0).R
-    da_gauges_t1 = ds_gauges.isel(id=[2, 1], time=0).R
-    da_gauges_t2 = ds_gauges.isel(id=[1, 0], time=0).R
+    ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1], time=0)
+    ds_cmls_t2 = ds_cmls.isel(cml_id=[2, 1], time=0)
+    ds_gauges_t2 = ds_gauges.isel(id=[2], time=0)
 
     # Select radar timestep
-    da_rad_t = ds_rad.isel(time=0).R.copy()
+    ds_rad_t = ds_rad.isel(time=0).copy()
 
     # Set some drift so that matrix is not singular
-    da_rad_t.data = np.array(
+    ds_rad_t["R"].data = np.array(
         [
-            [7.0564348, 5.7576878, 6.8637781, 7.0564348],
-            [7.0564348, 6.8637781, 5.4636964, 8.1919296],
-            [7.0564348, 5.2825001, 8.6940564, 5.9547064],
-            [7.0564348, 8.3845863, 7.2534534, 8.8627983],
+            [2.7079736, 2.9399488, 3.0, 3.0],
+            [2.9399488, 2.4661924, 2.9399488, 3.0],
+            [3.0, 5.0, 2.7079736, 3.0],
+            [3.0, 3.0, 3.0, 3.0],
         ]
     )
 
     # Initialize highlevel-class
     merger = merge.MergeKrigingExternalDrift(
-        ds_rad=ds_rad,
-        ds_cmls=ds_cmls,
-        ds_gauges=ds_gauges,
+        ds_rad=ds_rad_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
         nnear=8,
         min_observations=1,
         discretization=8,
-        variogram_parameters={"sill": 1, "range": 1, "nugget": 0.1},
+        variogram_parameters={"sill": 1, "range": 2, "nugget": 0},
     )
 
     # Adjust field
     adjusted = merger(
-        da_rad=da_rad_t,
-        da_cmls=da_cml_t1,
-        da_gauges=da_gauges_t1,
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
     )
 
     # Test that CML names is correctly updated and sorted in the class
-    assert (merger.intersect_weights.cml_id == da_cml_t1.cml_id).all()
+    assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
 
     # Test that cml midpoint and end coordinates corresponds to x0_cml
-    assert (merger.x_0_cml == da_cml_t1.site_0_x).all()
-    assert (merger.x_1_cml == da_cml_t1.site_1_x).all()
-    assert (merger.y_0_cml == da_cml_t1.site_0_y).all()
-    assert (merger.y_1_cml == da_cml_t1.site_1_y).all()
+    assert (merger.x_0_cml == ds_cmls_t.site_0_x).all()
+    assert (merger.x_1_cml == ds_cmls_t.site_1_x).all()
+    assert (merger.y_0_cml == ds_cmls_t.site_0_y).all()
+    assert (merger.y_1_cml == ds_cmls_t.site_1_y).all()
 
     # Test that gauge midpoint coordinates corresponds to x0_gauge
-    assert (merger.x_gauge == da_gauges_t1.x).all()
-    assert (merger.y_gauge == da_gauges_t1.y).all()
+    assert (merger.x_gauge == ds_gauges_t.x).all()
+    assert (merger.y_gauge == ds_gauges_t.y).all()
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [6.9695107, 5.169682, 6.7025233, 6.9695107],
-            [6.9695107, 6.7025233, 4.7619131, 8.5407423],
-            [6.9695107, 4.9613212, 9.2357075, 5.4423643],
-            [6.9695107, 8.8077297, 7.2421929, 9.0354948],
+            [1.2004057, 1.5849614, 1.6845109, 1.6845109],
+            [1.5849614, 0.7995943, 1.5849614, 1.6845109],
+            [1.6845109, 5.0, 1.2004057, 1.6845109],
+            [1.6845109, 1.6845109, 1.6845109, 1.6845109],
         ]
     )
 
     np.testing.assert_almost_equal(adjusted, data_check)
 
-    # calculate the adjusted field along CMLs
-    intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t1.site_0_x.data,
-        y1_line=da_cml_t1.site_0_y.data,
-        x2_line=da_cml_t1.site_1_x.data,
-        y2_line=da_cml_t1.site_1_y.data,
-        cml_id=da_cml_t1.cml_id.data,
-        x_grid=adjusted.x_grid.data,
-        y_grid=adjusted.y_grid.data,
-        grid_point_location="center",
-    )
-    adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
-        intersect_weights=intersect_weights,
-    )
-
-    # As the block kriging adjustment uses the variogram to fit the rainfall field,
-    # the get_grid_time_series_at_intersections uses the grid intersections and
-    # the grid is discretized, the adjusted radar along will not perfectly fit the
-    # CML observation. Thus we only test up to a certain decimal place.
-    np.testing.assert_almost_equal(
-        adjusted_at_cmls.data.ravel(),
-        da_cml_t1.data.ravel(),
-        decimal=1,  # not very precise, but decent
-    )
+    # Long CMLs average large areas; under stationarity, they
+    # observe the mean with uncertainty. The field need not
+    # match the CML exactly, so we skip path-wise agreement tests.
 
     # Test adjusted field at rain gauges
-    for gauge_id in da_gauges_t1.id:
+    for gauge_id in ds_gauges_t.id:
         merge_r = adjusted.sel(
-            x=da_gauges_t1.sel(id=gauge_id).x.data,
-            y=da_gauges_t1.sel(id=gauge_id).y.data,
+            x=ds_gauges_t.sel(id=gauge_id).x.data,
+            y=ds_gauges_t.sel(id=gauge_id).y.data,
         ).data
-        gauge_r = da_gauges_t1.sel(id=gauge_id).data
-        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=1)
+        gauge_r = ds_gauges_t.R.sel(id=gauge_id).data
+        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=8)
 
-    # New drift field based on other observations
-    da_rad_t.data = np.array(
+    # Create a new drift field for testing
+    ds_rad_t["R"].data = np.array(
         [
-            [1.8034557, 3.807717, 3.1030118, 2.9506274],
-            [2.7804554, 1.5221354, 4.1960881, 3.1030118],
-            [2.9506274, 4.5449719, 0.8625104, 3.977889],
-            [2.9506274, 2.9506274, 2.9506274, 2.9506274],
+            [7.6986128, 7.3003201, 7.6167094, 7.6986128],
+            [7.6986128, 7.6167094, 7.0145239, 7.8305215],
+            [7.6986128, 7.7425803, 8.0075458, 7.3442876],
+            [7.6986128, 7.9124249, 7.7425803, 9.0],
         ]
     )
 
     # Update the weights using some new links
     adjusted = merger(
-        da_rad=da_rad_t,
-        da_cmls=da_cml_t2,
-        da_gauges=da_gauges_t2,
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t2.R,
+        da_gauges=ds_gauges_t2.R,
     )
 
     # Test that CML names is correctly updated and sorted in the class
-    assert (merger.intersect_weights.cml_id == da_cml_t2.cml_id).all()
+    assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()
 
     # Test that cml midpoint and end coordinates corresponds to x0_cml
-    assert (merger.x_0_cml == da_cml_t2.site_0_x).all()
-    assert (merger.x_1_cml == da_cml_t2.site_1_x).all()
-    assert (merger.y_0_cml == da_cml_t2.site_0_y).all()
-    assert (merger.y_1_cml == da_cml_t2.site_1_y).all()
+    assert (merger.x_0_cml == ds_cmls_t2.site_0_x).all()
+    assert (merger.x_1_cml == ds_cmls_t2.site_1_x).all()
+    assert (merger.y_0_cml == ds_cmls_t2.site_0_y).all()
+    assert (merger.y_1_cml == ds_cmls_t2.site_1_y).all()
 
     # Test that gauge midpoint coordinates corresponds to x0_gauge
-    assert (merger.x_gauge == da_gauges_t2.x).all()
-    assert (merger.y_gauge == da_gauges_t2.y).all()
+    assert (merger.x_gauge == ds_gauges_t2.x).all()
+    assert (merger.y_gauge == ds_gauges_t2.y).all()
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
         [
-            [1.4398873, 4.4498312, 3.4063288, 3.1796229],
-            [2.9215497, 1.0088612, 5.0276201, 3.4063288],
-            [3.1796229, 4.9455518, 0.8261877, 4.7079044],
-            [3.1796229, 3.1796229, 3.1796229, 3.1796229],
+            [6.8297455, 5.711312, 6.512705, 6.950672],
+            [6.8596963, 6.5496356, 5.3518979, 7.4593091],
+            [6.9554314, 7.3897511, 8.084257, 6.021082],
+            [7.0071598, 7.9020355, 7.1694663, 9.0],
         ]
     )
 
     np.testing.assert_almost_equal(adjusted, data_check)
 
-    # calculate the adjusted field along CMLs
-    intersect_weights = plg.spatial.calc_sparse_intersect_weights_for_several_cmls(
-        x1_line=da_cml_t2.site_0_x.data,
-        y1_line=da_cml_t2.site_0_y.data,
-        x2_line=da_cml_t2.site_1_x.data,
-        y2_line=da_cml_t2.site_1_y.data,
-        cml_id=da_cml_t2.cml_id.data,
-        x_grid=adjusted.x_grid.data,
-        y_grid=adjusted.y_grid.data,
-        grid_point_location="center",
-    )
-    adjusted_at_cmls = plg.spatial.get_grid_time_series_at_intersections(
-        grid_data=adjusted.expand_dims("time"),
-        intersect_weights=intersect_weights,
-    )
-
-    # As the block kriging adjustment uses the variogram to fit the rainfall field,
-    # the get_grid_time_series_at_intersections uses the grid intersections and
-    # the grid is discretized, the adjusted radar along will not perfectly fit the
-    # CML observation. Thus we only test up to a certain decimal place.
-    np.testing.assert_almost_equal(
-        adjusted_at_cmls.data.ravel(),
-        da_cml_t2.data.ravel(),
-        decimal=0,  # not very precise, but decent
-    )
+    # Long CMLs average large areas; under stationarity, they
+    # observe the mean with uncertainty. The field need not
+    # match the CML exactly, so we skip path-wise agreement tests.
 
     # Test adjusted field at rain gauges
-    for gauge_id in da_gauges_t2.id:
+    for gauge_id in ds_gauges_t2.id:
         merge_r = adjusted.sel(
-            x=da_gauges_t2.sel(id=gauge_id).x.data,
-            y=da_gauges_t2.sel(id=gauge_id).y.data,
+            x=ds_gauges_t2.sel(id=gauge_id).x.data,
+            y=ds_gauges_t2.sel(id=gauge_id).y.data,
         ).data
-        gauge_r = da_gauges_t2.sel(id=gauge_id).data
-        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=0)
+        gauge_r = ds_gauges_t2.sel(id=gauge_id).R.data
+        np.testing.assert_almost_equal(merge_r, gauge_r, decimal=8)

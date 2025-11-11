@@ -364,10 +364,110 @@ def test_kedpoint_vs_pykrige_radarisone():
 
     interp_field_pykrige = z.reshape(da_rad_t.x_grid.shape)
 
-    print(interp_field)
-    print(interp_field_pykrige)
-
     np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
+
+
+def test_kud_ked():
+    # CML and rain gauge overlapping sets
+    ds_cmls_t = ds_cmls.isel(cml_id=[1], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1], time=0)
+    ds_grid_t = ds_rad.isel(time=0)
+
+    variogram_model = "spherical"
+    variogram_parameters = {"sill": 1, "range": 1, "nugget": 0.5}
+
+    # Initialize highlevel-class
+    interpolate_krig = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_grid_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
+        full_line=True,
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        nnear=12,
+        discretization=2,
+        min_observations=1,
+    )
+
+    # Set sigma and update R CML
+    ds_cmls_t["sigma"] = xr.full_like(ds_cmls_t.R, 0)
+    ds_cmls_t["R"] = xr.full_like(ds_cmls_t.R, 1)
+    ds_gauges_t["sigma"] = xr.full_like(ds_gauges_t.R, 0)
+
+    # Interpolate field
+    interp_field = interpolate_krig(
+        da_rad=ds_grid_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        da_cmls_sigma=ds_cmls_t.sigma,
+        da_gauges_sigma=ds_gauges_t.sigma,
+    )
+
+    # Test CML exact at 3 gridpoints (discretization = 2)
+    cml_avrg = ds_cmls_t.R.data
+    point1 = interp_field.sel(x=0, y=-1)
+    point2 = interp_field.sel(x=1, y=0)
+    point3 = interp_field.sel(x=2, y=1)
+
+    np.testing.assert_almost_equal(point1, cml_avrg)
+    np.testing.assert_almost_equal(point2, cml_avrg)
+    np.testing.assert_almost_equal(point3, cml_avrg)
+
+    # Test gauge at 1 gridpoint
+    gauge_avrg = ds_gauges_t.R.data
+    point1 = interp_field.sel(x=0, y=1)
+    np.testing.assert_almost_equal(gauge_avrg, point1)
+
+
+def test_kud_ok():
+    # CML and rain gauge overlapping sets
+    ds_cmls_t = ds_cmls.isel(cml_id=[1], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1], time=0)
+    ds_grid_t = ds_rad.isel(time=0)
+
+    variogram_model = "spherical"
+    variogram_parameters = {"sill": 1, "range": 1, "nugget": 0.5}
+
+    # Initialize highlevel-class
+    interpolate_krig = interpolate.InterpolateOrdinaryKriging(
+        ds_grid=ds_grid_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
+        full_line=True,
+        variogram_model=variogram_model,
+        variogram_parameters=variogram_parameters,
+        nnear=12,
+        discretization=2,
+        min_observations=1,
+    )
+
+    # Set sigma and update R CML
+    ds_cmls_t["sigma"] = xr.full_like(ds_cmls_t.R, 0)
+    ds_cmls_t["R"] = xr.full_like(ds_cmls_t.R, 1)
+    ds_gauges_t["sigma"] = xr.full_like(ds_gauges_t.R, 0)
+
+    # Interpolate field
+    interp_field = interpolate_krig(
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        da_cmls_sigma=ds_cmls_t.sigma,
+        da_gauges_sigma=ds_gauges_t.sigma,
+    )
+
+    # Test CML exact at 3 gridpoints (discretization = 2)
+    cml_avrg = ds_cmls_t.R.data
+    point1 = interp_field.sel(x=0, y=-1)
+    point2 = interp_field.sel(x=1, y=0)
+    point3 = interp_field.sel(x=2, y=1)
+
+    np.testing.assert_almost_equal(point1, cml_avrg)
+    np.testing.assert_almost_equal(point2, cml_avrg)
+    np.testing.assert_almost_equal(point3, cml_avrg)
+
+    # Test gauge at 1 gridpoint
+    gauge_avrg = ds_gauges_t.R.data
+    point1 = interp_field.sel(x=0, y=1)
+    np.testing.assert_almost_equal(gauge_avrg, point1)
 
 
 def test_blockkriging_vs_pykrige():

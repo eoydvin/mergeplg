@@ -18,8 +18,7 @@ class OBKrigTree:
     (1978) Mining Geostatistics.
 
     Can also do Kriging for Uncertain Data (KUD) by allowing sigma for
-    for each observation in __call__. See Cecinati et. al. (2017)
-    Considering Rain Gauge Uncertainty Using Kriging for Uncertain Data.
+    for each observation in __call__. See Cecinati et. al. (2017).
     """
 
     def __init__(
@@ -38,7 +37,7 @@ class OBKrigTree:
         """Construct kriging matrices and block geometry.
 
         Relies on xarray datasets for CML and rain gauge data following
-        the OpenSense naming convention.
+        the OpenSense naming convention. See example notebooks.
 
         Parameters
         ----------
@@ -68,7 +67,7 @@ class OBKrigTree:
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
-            x0_cml = calculate_cml_line(ds_cmls).data
+            x0_cml = calculate_cml_line(ds_cmls, discretization=discretization).data
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
 
             # Create block geometry for rain gauge
@@ -83,7 +82,7 @@ class OBKrigTree:
 
         elif ds_cmls is not None:
             # Get structured coordinates of CML and store
-            x0 = calculate_cml_line(ds_cmls).data
+            x0 = calculate_cml_line(ds_cmls, discretization=discretization).data
 
         elif ds_gauges is not None:
             # Get structured coordinates of rain gauge
@@ -110,7 +109,7 @@ class OBKrigTree:
         var_within = variogram(lengths_within_l).mean(axis=(1, 2))
 
         # Mean variance within block pairs
-        var_within = 0.5 * (var_within + var_within.reshape(-1, 1))
+        var_within_pairs = 0.5 * (var_within + var_within.reshape(-1, 1))
 
         # Calculate lengths between all points along all blocks
         lengths_block_l = block_points_to_lengths(x0)
@@ -119,13 +118,10 @@ class OBKrigTree:
         var_block = variogram(lengths_block_l).mean(axis=(2, 3))
 
         # Subtract within from block and turn into covariance
-        cov_mat = var_within - var_block
+        cov_mat = var_within_pairs - var_block
 
-        # Add nugget value to diagonal
-        nugget = variogram(
-            np.array([0.0]),
-        )
-        np.fill_diagonal(cov_mat, nugget)
+        # Set diagonal to C0
+        np.fill_diagonal(cov_mat, var_within)
 
         # Create Kriging matrix
         mat = np.zeros([n_obs + 1, n_obs + 1])
@@ -169,13 +165,14 @@ class OBKrigTree:
 
         # Store data to self
         self.mat = mat
-        self.var_within = np.diag(var_within)
-        self.n_obs = self.var_within.size
+        self.var_within = var_within
+        self.n_obs = var_within.size
         self.var_line_point = var_line_point
         self.ixs = ixs
         self.nnear = nnear
+        self.nugget = variogram(0)
 
-    def __call__(self, obs, sigma):
+    def __call__(self, obs, sigma=None):
         """Interpolate obs for one timestep
 
         Parameters
@@ -185,7 +182,8 @@ class OBKrigTree:
             order.
         sigma: numpy array
             1D array containing the uncertainty associated with the cml and
-            rain gauge observations.
+            rain gauge observations. If None, the uncertainty estimated from
+            variogram in init is used instead.
 
         Returns
         -------
@@ -193,11 +191,12 @@ class OBKrigTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-        # Add observation uncertainty to kriging matrix
+        # Get kriging matrix
         mat = self.mat.copy()
-        diagonal = np.diag(mat).copy()
-        diagonal[:-1] = diagonal[:-1] + sigma
-        np.fill_diagonal(mat, diagonal)
+
+        # If sigma is given, overwrite diagonal
+        if sigma is not None:
+            np.fill_diagonal(mat, np.append(sigma, 0))
 
         # Indices from nearest neighbour
         ixs = self.ixs.copy()
@@ -222,8 +221,8 @@ class OBKrigTree:
             # Remove indices equal to n_obs, select the first nnear.
             ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
 
-            # Subtract withinblock covariance of the blocks.
-            target = -1 * (var_line_point[i, ind] - self.var_within[ind])
+            # Subtract withinblock covariance of the blocks
+            target = 0.5 * (self.var_within[ind] + self.nugget) - var_line_point[i, ind]
 
             # Add non bias condition
             target = np.append(target, 1)
@@ -301,7 +300,7 @@ class BKEDTree:
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
-            x0_cml = calculate_cml_line(ds_cmls).data
+            x0_cml = calculate_cml_line(ds_cmls, discretization=discretization).data
             x0_gauge = calculate_gauge_midpoint(ds_gauges)
 
             # Create block geometry for rain gauge
@@ -316,7 +315,7 @@ class BKEDTree:
 
         elif ds_cmls is not None:
             # Get structured coordinates of CML and store
-            x0 = calculate_cml_line(ds_cmls).data
+            x0 = calculate_cml_line(ds_cmls, discretization=discretization).data
 
         else:
             # Get structured coordinates of rain gauge
@@ -343,7 +342,7 @@ class BKEDTree:
         var_within = variogram(lengths_within_l).mean(axis=(1, 2))
 
         # Mean variance within block pairs
-        var_within = 0.5 * (var_within + var_within.reshape(-1, 1))
+        var_within_pairs = 0.5 * (var_within + var_within.reshape(-1, 1))
 
         # Calculate lengths between all points along all blocks
         lengths_block_l = block_points_to_lengths(x0)
@@ -352,13 +351,10 @@ class BKEDTree:
         var_block = variogram(lengths_block_l).mean(axis=(2, 3))
 
         # Subtract within from block and turn into covariance
-        cov_mat = var_within - var_block
+        cov_mat = var_within_pairs - var_block
 
-        # Add nugget value to diagonal
-        nugget = variogram(
-            np.array([0.0]),
-        )
-        np.fill_diagonal(cov_mat, nugget)
+        # Set diagonal to C0
+        np.fill_diagonal(cov_mat, var_within)
 
         # Create Kriging matrix
         mat = np.zeros([cov_mat.shape[0] + 2, cov_mat.shape[1] + 2])
@@ -402,18 +398,19 @@ class BKEDTree:
 
         # Store data to self
         self.mat = mat
-        self.var_within = np.diag(var_within)
-        self.n_obs = self.var_within.size
+        self.var_within = var_within
+        self.n_obs = var_within.size
         self.var_line_point = var_line_point
         self.ixs = ixs
         self.nnear = nnear
+        self.nugget = variogram(0)
 
     def __call__(
         self,
         rad_field,
         obs,
         rad_obs,
-        sigma,
+        sigma=None,
     ):
         """Perform KED for one time step
 
@@ -425,7 +422,8 @@ class BKEDTree:
             Radar observations at ground.
         sigma: numpy array
             1D array containing the uncertainty associated with the cml and
-            rain gauge observations.
+            rain gauge observations. If None, the uncertainty estimated from
+            variogram in init is used instead.
 
         Returns
         -------
@@ -433,14 +431,14 @@ class BKEDTree:
             1D array with the same length as the number of coordinates
             (points.shape[0]) containing the interpolated field.
         """
-        # Add observation uncertainty to kriging matrix
+        # Get kriging matrix
         mat = self.mat.copy()
-        diagonal = np.diag(mat).copy()
-        diagonal[:-2] = diagonal[:-2] + sigma
-        np.fill_diagonal(mat, diagonal)
+
+        # If sigma is given, overwrite diagonal
+        if sigma is not None:
+            np.fill_diagonal(mat, np.append(sigma, [0, 0]))
 
         # Set drift term in kriging matrix
-        mat = self.mat.copy()
         mat[-1, :-2] = rad_obs  # Radar drift
         mat[:-2, -1] = rad_obs  # Radar drift
 
@@ -469,7 +467,7 @@ class BKEDTree:
             ind = ixs[i][ixs[i] < self.n_obs][: self.nnear]
 
             # Subtract withinblock covariance of the blocks.
-            target = -1 * (var_line_point[i, ind] - self.var_within[ind])
+            target = 0.5 * (self.var_within[ind] + self.nugget) - var_line_point[i, ind]
 
             # Add non bias condition
             target = np.append(target, [1, rad_field[i]])

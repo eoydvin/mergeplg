@@ -383,6 +383,10 @@ class InterpolateKrigingBase(InterpolatorBase):
         obs = np.concatenate([obs_cmls, obs_gauges]).astype(float)
         sigma = np.concatenate([sigma_cmls, sigma_gauges]).astype(float)
 
+        # If both cml and gauge sigma is none, set sigma to none
+        if (da_cmls_sigma is None) and (da_gauges_sigma is None):
+            sigma = None
+
         return obs, sigma
 
 
