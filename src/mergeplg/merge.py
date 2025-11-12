@@ -243,7 +243,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         grid_location_radar="center",
         min_observations=1,
         p=2,
-        idw_method="radolan",
+        idw_method="standard",
         nnear=8,
         max_distance=60000,
         method="additive",
