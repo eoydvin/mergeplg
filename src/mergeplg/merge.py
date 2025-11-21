@@ -447,6 +447,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
+        c0_within=False,
     ):
         """
         Initialize merging object.
@@ -493,6 +494,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
                 - If None, no range checks are applied.
             For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
             applies a difference limit of 10 and a ratio range of 0.1 to 15.
+        c0_within: bool
+            If True, estimate observation uncertainty using withinblock variance,
+            False (default) uses variogram nugget.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -507,6 +511,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             nnear=nnear,
             max_distance=max_distance,
             full_line=full_line,
+            c0_within=c0_within,
         )
 
         # Init weights update
@@ -648,6 +653,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
+        c0_within=False,
     ):
         """
         Initialize merging object.
@@ -691,6 +697,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
                 - If None, no range checks are applied.
             For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
             applies a difference limit of 10 and a ratio range of 0.1 to 15.
+        c0_within: bool
+            If True, estimate observation uncertainty using withinblock variance,
+            False (default) uses variogram nugget.
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -705,6 +714,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             nnear=nnear,
             max_distance=max_distance,
             full_line=full_line,
+            c0_within=c0_within,
         )
 
         # Init weights update
@@ -726,6 +736,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             nnear=self.nnear,
             max_distance=self.max_distance,
             full_line=self.full_line,
+            c0_within=self.c0_within,
         )
 
     def __call__(

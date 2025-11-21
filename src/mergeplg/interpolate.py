@@ -302,6 +302,7 @@ class InterpolateKrigingBase(InterpolatorBase):
         nnear=8,
         max_distance=60000,
         full_line=True,
+        c0_within=False,
     ):
         """Initialize interpolator object
 
@@ -331,12 +332,16 @@ class InterpolateKrigingBase(InterpolatorBase):
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        c0_within: bool
+            If True, estimate observation uncertainty using withinblock variance,
+            False (default) uses variogram nugget.
         """
         self.discretization = discretization
         self.min_observations = min_observations
         self.nnear = nnear
         self.max_distance = max_distance
         self.full_line = full_line
+        self.c0_within = c0_within
 
         # Construct variogram using parameters provided by user
         if variogram_parameters is None:
@@ -411,6 +416,7 @@ class InterpolateOrdinaryKriging(InterpolateKrigingBase):
             full_line=self.full_line,
             nnear=self.nnear,
             max_distance=self.max_distance,
+            c0_within=self.c0_within,
         )
 
     def __call__(

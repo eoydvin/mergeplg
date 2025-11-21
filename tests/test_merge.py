@@ -476,6 +476,48 @@ def test_MergeDifferenceIDW():
         assert gauge_r == merge_r
 
 
+def test_MergeDifferenceOrdinaryKriging_c0():
+    # CML and rain gauge overlapping sets
+    ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1], time=0)
+
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0)
+
+    # Initialize highlevel-class
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
+        nnear=8,
+        min_observations=1,
+        method="additive",
+        discretization=20,
+        variogram_model="spherical",
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        c0_within=False,
+    )
+
+    # Adjust field
+    adjusted = merger(
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+    )
+
+    # test that the adjusted field is the same as first run
+    data_check = np.array(
+        [
+            [1.1788793, 1.5957385, 1.6926061, 1.6926061],
+            [1.5957385, 0.8272601, 1.5957385, 1.6926061],
+            [1.6926061, 5.0, 1.1788793, 1.6926061],
+            [1.6926061, 1.6926061, 1.6926061, 1.6926061],
+        ]
+    )
+
+    np.testing.assert_almost_equal(adjusted, data_check)
+
+
 def test_MergeDifferenceOrdinaryKriging():
     # CML and rain gauge overlapping sets
     ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
@@ -497,6 +539,7 @@ def test_MergeDifferenceOrdinaryKriging():
         discretization=40,
         variogram_model="spherical",
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        c0_within=True,
     )
 
     # Adjust field
@@ -590,6 +633,56 @@ def test_MergeDifferenceOrdinaryKriging():
         )
 
 
+def test_MergeBlockKrigingExternalDrift_c0():
+    # CML and rain gauge overlapping sets
+    ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[1, 2], time=0)
+
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0).copy()
+
+    # Set some drift so that matrix is not singular
+    ds_rad_t["R"].data = np.array(
+        [
+            [2.7079736, 2.9399488, 3.0, 3.0],
+            [2.9399488, 2.4661924, 2.9399488, 3.0],
+            [3.0, 5.0, 2.7079736, 3.0],
+            [3.0, 3.0, 3.0, 3.0],
+        ]
+    )
+
+    # Initialize highlevel-class
+    merger = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_rad_t,
+        ds_cmls=ds_cmls_t,
+        ds_gauges=ds_gauges_t,
+        nnear=8,
+        min_observations=1,
+        discretization=8,
+        variogram_parameters={"sill": 1, "range": 2, "nugget": 0},
+        c0_within=True,
+    )
+
+    # Adjust field
+    adjusted = merger(
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+    )
+
+    # test that the adjusted field is the same as first run
+    data_check = np.array(
+        [
+            [3.6450039, 3.9961395, 4.7164175, 4.8992262],
+            [3.9136239, 2.6078412, 3.9136239, 4.7856179],
+            [4.4943462, 5.0, 3.9051202, 5.9863823],
+            [4.8167106, 4.5635466, 5.9038667, 9.0],
+        ]
+    )
+
+    np.testing.assert_almost_equal(adjusted, data_check)
+
+
 def test_MergeBlockKrigingExternalDrift():
     # CML and rain gauge overlapping sets
     ds_cmls_t = ds_cmls.isel(cml_id=[0], time=0)
@@ -619,6 +712,7 @@ def test_MergeBlockKrigingExternalDrift():
         min_observations=1,
         discretization=8,
         variogram_parameters={"sill": 1, "range": 2, "nugget": 0},
+        c0_within=True,
     )
 
     # Adjust field

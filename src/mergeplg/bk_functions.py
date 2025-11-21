@@ -33,6 +33,7 @@ class OBKrigTree:
         nnear_mult=2,
         max_distance=60000,
         full_line=True,
+        c0_within=False,
     ):
         """Construct kriging matrices and block geometry.
 
@@ -64,6 +65,9 @@ class OBKrigTree:
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        c0_within: bool
+            If True, estimate observation uncertainty using withinblock variance,
+            False (default) uses variogram nugget.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -120,8 +124,12 @@ class OBKrigTree:
         # Subtract within from block and turn into covariance
         cov_mat = var_within_pairs - var_block
 
-        # Set diagonal to C0
-        np.fill_diagonal(cov_mat, var_within)
+        # Set observation uncertainty and add to diagonal
+        if c0_within is False:
+            nugget = variogram(np.array([0.0]))
+            np.fill_diagonal(cov_mat, nugget)
+        else:
+            np.fill_diagonal(cov_mat, var_within)
 
         # Create Kriging matrix
         mat = np.zeros([n_obs + 1, n_obs + 1])
@@ -266,6 +274,7 @@ class BKEDTree:
         nnear_mult=2,
         max_distance=60000,
         full_line=True,
+        c0_within=False,
     ):
         """Construct kriging matrices and block geometry.
 
@@ -297,6 +306,9 @@ class BKEDTree:
         full_line: bool
             Whether to use the full line for block kriging. If set to false, the
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
+        c0_within: bool
+            If True, estimate observation uncertainty using withinblock variance,
+            False (default) uses variogram nugget.
         """
         if (ds_cmls is not None) and (ds_gauges is not None):
             # Get structured coordinates of CML and rain gauge
@@ -353,8 +365,12 @@ class BKEDTree:
         # Subtract within from block and turn into covariance
         cov_mat = var_within_pairs - var_block
 
-        # Set diagonal to C0
-        np.fill_diagonal(cov_mat, var_within)
+        # Set observation uncertainty and add to diagonal
+        if c0_within is False:
+            nugget = variogram(np.array([0.0]))
+            np.fill_diagonal(cov_mat, nugget)
+        else:
+            np.fill_diagonal(cov_mat, var_within)
 
         # Create Kriging matrix
         mat = np.zeros([cov_mat.shape[0] + 2, cov_mat.shape[1] + 2])
