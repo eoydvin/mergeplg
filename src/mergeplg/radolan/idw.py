@@ -204,6 +204,17 @@ class Invdisttree:
                 suchradius=max_distance,
                 nnear=nnear,
             )
+
+        elif idw_method == "overeem":
+            interpol = _numba_idw_loop_overeem(
+                distances=self.distances,
+                ixs=ix,
+                z=self.z,
+                z_shape=z[0].shape,
+                rs=rs,
+                nnear=nnear,
+            )
+
         else:
             msg = f"IDW method {idw_method} not supported"
             raise ValueError(msg)
@@ -270,3 +281,31 @@ def _numba_idw_loop_radolan(
         interpol[jinterpol] = wz
         jinterpol += 1  # noqa: SIM113
     return interpol
+
+@jit(nopython=True)
+def _numba_idw_loop(distances, ixs, z, z_shape, p, nnear):  # pragma: no cover
+    interpol = np.zeros((len(distances),) + z_shape)  # noqa: RUF005
+    jinterpol = 0
+    for i in range(len(distances)):
+        dist = distances[i]
+        ix = ixs[i]
+
+        # drop entries where ix item == z, which is how KDTree.query indicates
+        # missing neighbours
+        dist = dist[ix < len(z)][:nnear]
+        ix = ix[ix < len(z)][:nnear]
+
+        if len(ix) == 0:
+            wz = np.nan
+        elif dist[0] < 1e-10:
+            wz = z[ix[0]]
+        else:  # weight z s by 1/dist --
+            # standard IDW
+            w = 1 / dist**p
+            w /= np.sum(w)
+            wz = np.dot(w, z[ix])
+
+        interpol[jinterpol] = wz
+        jinterpol += 1  # noqa: SIM113
+    return interpol
+
