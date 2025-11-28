@@ -157,6 +157,9 @@ class InterpolateIDW(InterpolatorBase):
         idw_method="standard",
         nnear=8,
         max_distance=60000,
+        rs=30000,
+        rl=100000,
+        v=0.5
     ):
         """Initialize interpolator object
 
@@ -194,6 +197,9 @@ class InterpolateIDW(InterpolatorBase):
         self.idw_method = idw_method
         self.nnear = nnear
         self.max_distance = max_distance
+        self.rs=rs
+        self.rl=rl
+        self.v=v
 
     def _init_interpolator(self, _ygrid, _xgrid, ds_cmls, ds_gauges):
         # Get CML and gauge coordinates if present
@@ -274,6 +280,9 @@ class InterpolateIDW(InterpolatorBase):
             p=self.p,
             idw_method=self.idw_method,
             max_distance=self.max_distance,
+            rs=self.rs,
+            rl=self.rl,
+            v=self.v,
         ).reshape(self.x_grid.shape)
 
         da = xr.DataArray(

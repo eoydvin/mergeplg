@@ -246,6 +246,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         idw_method="standard",
         nnear=8,
         max_distance=60000,
+        rs=30000,
+        rl=500000,
+        v=0.5,
         method="additive",
         radar_threshold=0.01,
         fill_radar=True,
@@ -304,6 +307,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             idw_method=idw_method,
             nnear=nnear,
             max_distance=max_distance,
+            rs=rs,
+            rl=rl,
+            v=v,
         )
 
         # Init mergerging
@@ -387,6 +393,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             p=self.p,
             idw_method=self.idw_method,
             max_distance=self.max_distance,
+            rs=self.rs,
+            rl=self.rl,
+            v=self.v,
         ).reshape(self.x_grid.shape)
 
         interpolated = xr.DataArray(

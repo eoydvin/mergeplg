@@ -98,6 +98,9 @@ class Invdisttree:
         p=1,
         idw_method="standard",
         max_distance=60,
+        rs=30000,
+        rl=500000,
+        v=0.5
     ):
         """Bla.
 
@@ -212,6 +215,8 @@ class Invdisttree:
                 z=self.z,
                 z_shape=z[0].shape,
                 rs=rs,
+                rl=rl,
+                v=v,
                 nnear=nnear,
             )
 
@@ -283,7 +288,7 @@ def _numba_idw_loop_radolan(
     return interpol
 
 @jit(nopython=True)
-def _numba_idw_loop(distances, ixs, z, z_shape, p, nnear):  # pragma: no cover
+def _numba_idw_loop_overeem(distances, ixs, z, z_shape, rs, rl, v, nnear):  # pragma: no cover
     interpol = np.zeros((len(distances),) + z_shape)  # noqa: RUF005
     jinterpol = 0
     for i in range(len(distances)):
@@ -301,7 +306,9 @@ def _numba_idw_loop(distances, ixs, z, z_shape, p, nnear):  # pragma: no cover
             wz = z[ix[0]]
         else:  # weight z s by 1/dist --
             # standard IDW
-            w = 1 / dist**p
+            ws = (np.exp(-4*(dist**2)*(rs**2)) - np.exp(-4))/(np.exp(1 - np.exp(-4)))
+            wl = (np.exp(-4*(dist**2)*(rl**2)) - np.exp(-4))/(np.exp(1 - np.exp(-4)))
+            w = (ws + v*wl)/(1 + v)
             w /= np.sum(w)
             wz = np.dot(w, z[ix])
 
