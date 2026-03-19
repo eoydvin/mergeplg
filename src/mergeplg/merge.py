@@ -448,6 +448,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         fill_radar=True,
         range_checks=None,
         c0_within=False,
+        max_estimate=150,
+        radar_blend=0.3,
+        log_transform=False,
     ):
         """
         Initialize merging object.
@@ -497,6 +500,19 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         c0_within: bool
             If True, estimate observation uncertainty using withinblock variance,
             False (default) uses variogram nugget.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.
+        radar_blend: float
+            Blends gauge-adjusted and original radar fields using normalized
+            kriging uncertainty as weight: weight = (1 - variance)^radar_blend.
+                - 0.0 : Always use adjusted field
+                - 1.0 : Linear fallback to radar where uncertainty is high
+                - > 1  : Increasingly conservative; adjustment near observations
+        log_transform: bool
+            If True, applies the transformation log(1 + Z) to observations before
+            interpolation and the backtransformation exp(G) - 1 to the
+            interpoalted fields.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -522,6 +538,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
+        self.radar_blend = radar_blend
+        self.log_transform = log_transform
 
     def __call__(
         self,
@@ -597,14 +616,22 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         if (~np.isnan(diff)).sum() <= self.min_observations:
             return da_rad
 
+        # Transform difference
+        if self.log_transform:
+            diff = np.where(~np.isnan(diff), np.log(1 + diff), np.nan)
+
         # Interpolate the difference
-        interpolated, variance = self._interpolator(diff, sigma).reshape(self.x_grid.shape)
+        interpolated, variance = self._interpolator(diff, sigma)
         interpolated = xr.DataArray(
-            data=interpolated, coords=self.grid_coords, dims=self.grid_dims
+            data=interpolated.reshape(self.x_grid.shape), coords=self.grid_coords, dims=self.grid_dims
         )
         variance = xr.DataArray(
-            data=variance, coords=self.grid_coords, dims=self.grid_dims
+            data=variance.reshape(self.x_grid.shape), coords=self.grid_coords, dims=self.grid_dims
         )
+
+        # Backtransform difference
+        if self.log_transform:
+            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 1, np.nan)
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
@@ -624,15 +651,16 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
 
         # Blend radar and adjusted using kriging uncertainty
-        if True:
-            print('hepp')
-            variance_scale = np.nanmean(variance)
-            weight = np.where(
-                np.isnan(variance),
-                0,
-                1/(1 + variance/variance_scale)
-            )
-            adjusted = weight*adjusted + (1 - weight)*radar
+        if self.radar_blend:
+            variance = xr.where(variance > 1, 1, variance)
+            variance = xr.where(variance < 0, 0, variance)
+            variance = (variance - np.nanmin(variance))/(1- np.nanmin(variance))
+            weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
+            adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
@@ -668,6 +696,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         fill_radar=True,
         range_checks=None,
         c0_within=False,
+        max_estimate=150,
+        radar_blend=0.3,
     ):
         """
         Initialize merging object.
@@ -714,6 +744,15 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         c0_within: bool
             If True, estimate observation uncertainty using withinblock variance,
             False (default) uses variogram nugget.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.i
+        radar_blend: float
+            Blends gauge-adjusted and original radar fields using normalized
+            kriging uncertainty as weight: weight = (1 - variance)^radar_blend.
+                - 0.0 : Always use adjusted field
+                - 1.0 : Linear fallback to radar where uncertainty is high
+                - > 1  : Increasingly conservative; adjustment near observations
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -738,6 +777,8 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
+        self.radar_blend = radar_blend
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -816,15 +857,29 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             return da_rad
 
         # KED merging
-        adjusted = self._interpolator(
+        adjusted, variance = self._interpolator(
             da_rad_threshold.data.ravel(),
             obs,
             rad,
             sigma,
-        ).reshape(self.x_grid.shape)
+        )
+        adjusted = adjusted.reshape(self.x_grid.shape)
+        variance = variance.reshape(self.x_grid.shape)
 
         # Set negative estimates and radar below threshold to zero, keeping nan
         adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted)] = 0
+
+        # Blend radar and adjusted using kriging uncertainty
+        if self.radar_blend:
+            variance = xr.where(variance > 1, 1, variance)
+            variance = xr.where(variance < 0, 0, variance)
+            variance = (variance - np.nanmin(variance))/(1- np.nanmin(variance))
+            weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
+            adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
