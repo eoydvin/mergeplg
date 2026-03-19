@@ -598,9 +598,12 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             return da_rad
 
         # Interpolate the difference
-        interpolated = self._interpolator(diff, sigma).reshape(self.x_grid.shape)
+        interpolated, variance = self._interpolator(diff, sigma).reshape(self.x_grid.shape)
         interpolated = xr.DataArray(
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
+        )
+        variance = xr.DataArray(
+            data=variance, coords=self.grid_coords, dims=self.grid_dims
         )
 
         # Adjust radar field where radar is larger than zero
@@ -619,6 +622,17 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         # Set gridcells beyond max_distance to nan
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Blend radar and adjusted using kriging uncertainty
+        if True:
+            print('hepp')
+            variance_scale = np.nanmean(variance)
+            weight = np.where(
+                np.isnan(variance),
+                0,
+                1/(1 + variance/variance_scale)
+            )
+            adjusted = weight*adjusted + (1 - weight)*radar
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:

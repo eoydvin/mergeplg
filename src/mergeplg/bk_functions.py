@@ -223,6 +223,7 @@ class OBKrigTree:
         # array for storing CML-radar merge
         est_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
         estimate = np.zeros(ixs.shape[0])
+        variance = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(ixs.shape[0]):
@@ -239,14 +240,20 @@ class OBKrigTree:
             i_mat = np.append(ind, self.n_obs)
 
             # Solve the kriging system
-            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-1]
+            x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-1]
+            w = x[:-1]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
 
+            # Estimate variance
+            variance[i] = -x.dot(target)
+
         # Return dataset with interpolated values
         est_with_nan[~mask] = estimate
-        return est_with_nan
+        var_with_nan[~mask] = variance
+
+        return est_with_nan, variance
 
 
 class BKEDTree:

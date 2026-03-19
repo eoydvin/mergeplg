@@ -472,9 +472,14 @@ class InterpolateOrdinaryKriging(InterpolateKrigingBase):
             return da
 
         # Interpolate
-        interpolated = self._interpolator(obs, sigma).reshape(self.x_grid.shape)
+        interpolated, variance = self._interpolator(obs, sigma).reshape(self.x_grid.shape)
         da = xr.DataArray(
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
         da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+
+        da2 = xr.DataArray(
+            data=variance, coords=self.grid_coords, dims=self.grid_dims
+        )
+        da2.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+        return da, da2
