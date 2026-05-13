@@ -250,6 +250,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
+        max_estimate=150,
+        log_transform=False,
     ):
         """
         Initialize merging object.
@@ -292,6 +294,13 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
                 - If None, no range checks are applied.
             For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
             applies a difference limit of 10 and a ratio range of 0.1 to 15.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.
+        log_transform: bool
+            If True, applies the transformation log(1 + Z) to observations before
+            interpolation and the backtransformation exp(G) - 1 to the
+            interpoalted fields.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -314,6 +323,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
+        self.log_transform = log_transform
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -379,6 +390,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
 
+        # Transform difference
+        if self.log_transform:
+            diff = np.where(~np.isnan(diff), np.log(0.01 + diff), np.nan)
+
         # Interpolate difference
         interpolated = self._interpolator(
             q=coord_pred,
@@ -392,6 +407,11 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         interpolated = xr.DataArray(
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
+
+        # Backtransform difference
+        if self.log_transform:
+            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan)
+
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
@@ -409,6 +429,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Set gridcells beyond max_distance to nan
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
@@ -439,7 +463,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=1,
+        min_observations=3,
         method="additive",
         nnear=8,
         max_distance=60000,
@@ -449,7 +473,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         range_checks=None,
         c0_within=False,
         max_estimate=150,
-        radar_blend=0.3,
+        radar_blend=0,
         log_transform=False,
     ):
         """
@@ -618,7 +642,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         # Transform difference
         if self.log_transform:
-            diff = np.where(~np.isnan(diff), np.log(1 + diff), np.nan)
+            diff = np.where(~np.isnan(diff), np.log(0.01 + diff), np.nan)
 
         # Interpolate the difference
         interpolated, variance = self._interpolator(diff, sigma)
@@ -631,7 +655,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         # Backtransform difference
         if self.log_transform:
-            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 1, np.nan)
+            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan)
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
@@ -654,7 +678,12 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         if self.radar_blend:
             variance = xr.where(variance > 1, 1, variance)
             variance = xr.where(variance < 0, 0, variance)
-            variance = (variance - np.nanmin(variance))/(1- np.nanmin(variance))
+
+            # If variance high everywhere, use radar
+            if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
+                variance = np.zeros(variance.shape)
+            else:
+                variance = (variance - np.nanmin(variance))/(1 - np.nanmin(variance))
             weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
             adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
 
@@ -688,7 +717,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=1,
+        min_observations=3,
         nnear=8,
         max_distance=60000,
         full_line=True,
@@ -697,7 +726,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         range_checks=None,
         c0_within=False,
         max_estimate=150,
-        radar_blend=0.3,
+        radar_blend=0,
     ):
         """
         Initialize merging object.
@@ -873,7 +902,12 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         if self.radar_blend:
             variance = xr.where(variance > 1, 1, variance)
             variance = xr.where(variance < 0, 0, variance)
-            variance = (variance - np.nanmin(variance))/(1- np.nanmin(variance))
+            # If variance high or not defined (typically few obs), use radar
+            if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
+                variance = np.zeros(variance.shape)
+            else:
+                variance = (variance - np.nanmin(variance))/(1 - np.nanmin(variance))
+
             weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
             adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
 

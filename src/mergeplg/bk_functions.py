@@ -505,14 +505,15 @@ class BKEDTree:
             if (mat[-1, ind] == mat[-1, ind[0]]).all():
                 x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
                 w = x[:-1]
+                variance[i] = -x.dot(target[:-1])
             else:
                 # Solve the kriging system
                 x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)
                 w = x[:-2]
+                variance[i] = -x.dot(target)
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
-            variance[i] = -x.dot(target)
 
         # Return dataset with interpolated values
         est_with_nan[~mask] = estimate
