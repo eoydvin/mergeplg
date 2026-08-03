@@ -276,11 +276,13 @@ class InterpolateIDW(InterpolatorBase):
             max_distance=self.max_distance,
         ).reshape(self.x_grid.shape)
 
-        da = xr.DataArray(
-            data=interpolated, coords=self.grid_coords, dims=self.grid_dims
+        ds = xr.Dataset(
+            data_vars={"rainfall": (self.grid_dims, interpolated)},
+            coords=self.grid_coords,
         )
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds
 
 
 class InterpolateKrigingBase(InterpolatorBase):
@@ -474,9 +476,13 @@ class InterpolateOrdinaryKriging(InterpolateKrigingBase):
         # Interpolate
         interpolated, variance = self._interpolator(obs, sigma)
 
-        interpolated = xr.DataArray(
-            data=interpolated.reshape(self.x_grid.shape), coords=self.grid_coords, dims=self.grid_dims
+        ds = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, interpolated.reshape(self.x_grid.shape)),
+                "variance": (self.grid_dims, variance.reshape(self.x_grid.shape)),
+            },
+            coords=self.grid_coords,
         )
-        interpolated.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
 
-        return interpolated
+        return ds

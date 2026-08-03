@@ -520,6 +520,7 @@ class BKEDTree:
         var_with_nan[~mask] = variance
         return est_with_nan, var_with_nan
 
+
 def within_block_l(x0):
     """Calculate the lengths within all CMLs.
 

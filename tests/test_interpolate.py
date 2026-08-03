@@ -73,7 +73,7 @@ def test_interpolator_OK_exact_at_points():
     # Test that providing only RG works
     interpolated = interpolator(
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for gauge_id in ds_gauges_t1.id:
         merge_r = interpolated.sel(
             x=ds_gauges_t1.sel(id=gauge_id).x.data,
@@ -89,7 +89,7 @@ def test_interpolator_OK_exact_at_points():
     # Test that providing only CML works
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -106,7 +106,7 @@ def test_interpolator_OK_exact_at_points():
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -146,7 +146,7 @@ def test_interpolator_IDW_exact_at_points():
     # Test that providing only RG works
     interpolated = interpolator(
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for gauge_id in ds_gauges_t1.id:
         merge_r = interpolated.sel(
             x=ds_gauges_t1.sel(id=gauge_id).x.data,
@@ -162,7 +162,7 @@ def test_interpolator_IDW_exact_at_points():
     # Test that providing only CML works
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -179,7 +179,7 @@ def test_interpolator_IDW_exact_at_points():
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -284,7 +284,7 @@ def test_kedpoint_vs_pykrige():
     interp_field = interpolate_ked(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Setup pykrige
     ked = pykrige.UniversalKriging(
@@ -339,7 +339,7 @@ def test_kedpoint_vs_pykrige_radarisone():
     interp_field = interpolate_ked(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Get value at gauges
     rad = da_rad_t.sel(x=da_gauges_t.x, y=da_gauges_t.y).data
@@ -401,7 +401,7 @@ def test_kud_ked():
         da_gauges=ds_gauges_t.R,
         da_cmls_sigma=ds_cmls_t.sigma,
         da_gauges_sigma=ds_gauges_t.sigma,
-    )
+    ).rainfall
 
     # Test CML exact at 3 gridpoints (discretization = 2)
     cml_avrg = ds_cmls_t.R.data
@@ -452,7 +452,7 @@ def test_kud_ok():
         da_gauges=ds_gauges_t.R,
         da_cmls_sigma=ds_cmls_t.sigma,
         da_gauges_sigma=ds_gauges_t.sigma,
-    )
+    ).rainfall
 
     # Test CML exact at 3 gridpoints (discretization = 2)
     cml_avrg = ds_cmls_t.R.data
@@ -493,7 +493,7 @@ def test_blockkriging_vs_pykrige():
     # Interpolate field
     interp_field = interpolate_krig(
         da_cmls=ds_cml_t1.R,
-    )
+    ).rainfall
 
     x_mid = 0.5 * (ds_cml_t1.site_0_x + ds_cml_t1.site_1_x).data
     y_mid = 0.5 * (ds_cml_t1.site_0_y + ds_cml_t1.site_1_y).data

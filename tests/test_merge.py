@@ -71,13 +71,14 @@ def test_max_distance():
         method="additive",
         max_distance=2,
         fill_radar=False,
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
 
     # Gauges located at (1, 1) and (0, 1) are within all cells
     # (by 2 units) for all gridcells, except the lower row y=-1
@@ -98,13 +99,14 @@ def test_multiplicative_additiveKriging():
         full_line=False,
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
         method="additive",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -124,13 +126,14 @@ def test_multiplicative_additiveKriging():
         method="multiplicative",
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
         full_line=False,
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -154,7 +157,7 @@ def test_multiplicative_additiveKriging():
         merged = merger(
             da_rad_t,
             da_gauges=da_gauges_t1,
-        )
+        ).rainfall
 
 
 def test_multiplicative_additiveIDW():
@@ -169,13 +172,14 @@ def test_multiplicative_additiveIDW():
         ds_rad=ds_rad,
         ds_gauges=ds_gauges,
         method="additive",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -193,13 +197,14 @@ def test_multiplicative_additiveIDW():
         ds_rad=ds_rad,
         ds_gauges=ds_gauges,
         method="multiplicative",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -223,7 +228,7 @@ def test_multiplicative_additiveIDW():
         merged = merger(
             da_rad_t,
             da_gauges=da_gauges_t1,
-        )
+        ).rainfall
 
 
 def test_obk_filter():
@@ -251,7 +256,7 @@ def test_obk_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -283,7 +288,7 @@ def test_obk_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -327,7 +332,7 @@ def test_idw_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -359,7 +364,7 @@ def test_idw_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -403,7 +408,7 @@ def test_MergeDifferenceIDW():
         da_rad=da_rad_t,
         da_cmls=da_cml_t1,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
 
     # Check CMLs
     for cml_id in da_cml_t1.cml_id:
@@ -428,7 +433,7 @@ def test_MergeDifferenceIDW():
         da_rad=da_rad_t,
         da_cmls=da_cml_t2,
         da_gauges=da_gauges_t2,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == da_cml_t2.cml_id).all()
@@ -464,7 +469,7 @@ def test_MergeDifferenceIDW():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t2,
-    )
+    ).rainfall
 
     # Check that field is fit to gauges
     for id in da_gauges_t2.id:
@@ -503,7 +508,7 @@ def test_MergeDifferenceOrdinaryKriging_c0():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
@@ -547,7 +552,7 @@ def test_MergeDifferenceOrdinaryKriging():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
@@ -592,7 +597,7 @@ def test_MergeDifferenceOrdinaryKriging():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t2.R,
         da_gauges=ds_gauges_t2.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()
@@ -668,7 +673,7 @@ def test_MergeBlockKrigingExternalDrift_c0():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
@@ -720,7 +725,7 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
@@ -775,7 +780,7 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t2.R,
         da_gauges=ds_gauges_t2.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()

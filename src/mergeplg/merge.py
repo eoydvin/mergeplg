@@ -241,7 +241,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         ds_cmls=None,
         ds_gauges=None,
         grid_location_radar="center",
-        min_observations=1,
+        min_observations=3,
         p=2,
         idw_method="standard",
         nnear=8,
@@ -384,8 +384,8 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         diff[flagged] = np.nan  # ignored in interpolator
 
         # If few observations return radar grid
-        if (~np.isnan(flagged)).sum() <= self.min_observations:
-            return da_rad
+        if (~np.isnan(diff)).sum() <= self.min_observations:
+            return da_rad.to_dataset(name="rainfall")
 
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
@@ -410,8 +410,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Backtransform difference
         if self.log_transform:
-            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan)
-
+            interpolated = np.where(
+                ~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan
+            )
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
@@ -432,15 +433,23 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         # Cap large rainfall estimates
         if self.max_estimate:
-            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds
 
 
 class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, MergeBase):
@@ -635,10 +644,11 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Flag indices based on user defined thresholds
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
         diff[flagged] = np.nan  # ignored in interpolator
-
         # If few observations return the radar grid
         if (~np.isnan(diff)).sum() <= self.min_observations:
-            return da_rad
+            ds = da_rad.to_dataset(name="rainfall")
+            ds["variance"] = xr.full_like(da_rad, np.nan)
+            return ds
 
         # Transform difference
         if self.log_transform:
@@ -647,15 +657,21 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Interpolate the difference
         interpolated, variance = self._interpolator(diff, sigma)
         interpolated = xr.DataArray(
-            data=interpolated.reshape(self.x_grid.shape), coords=self.grid_coords, dims=self.grid_dims
+            data=interpolated.reshape(self.x_grid.shape),
+            coords=self.grid_coords,
+            dims=self.grid_dims,
         )
         variance = xr.DataArray(
-            data=variance.reshape(self.x_grid.shape), coords=self.grid_coords, dims=self.grid_dims
+            data=variance.reshape(self.x_grid.shape),
+            coords=self.grid_coords,
+            dims=self.grid_dims,
         )
 
         # Backtransform difference
         if self.log_transform:
-            interpolated = np.where(~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan)
+            interpolated = np.where(
+                ~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan
+            )
 
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
@@ -683,21 +699,30 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
                 variance = np.zeros(variance.shape)
             else:
-                variance = (variance - np.nanmin(variance))/(1 - np.nanmin(variance))
-            weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
-            adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
+                variance = (variance - np.nanmin(variance)) / (1 - np.nanmin(variance))
+            weight = np.where(np.isnan(variance), 0, (1 - variance) ** self.radar_blend)
+            adjusted = weight * adjusted + (1 - weight) * da_rad_threshold
 
         # Cap large rainfall estimates
         if self.max_estimate:
-            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+                "variance": (self.grid_dims, variance.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds
 
 
 class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
@@ -883,7 +908,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
 
         # If few observations return radar
         if (~np.isnan(obs)).sum() <= self.min_observations:
-            return da_rad
+            ds = da_rad.to_dataset(name="rainfall")
+            ds["variance"] = xr.full_like(da_rad, np.nan)
+            return ds
 
         # KED merging
         adjusted, variance = self._interpolator(
@@ -906,19 +933,28 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
                 variance = np.zeros(variance.shape)
             else:
-                variance = (variance - np.nanmin(variance))/(1 - np.nanmin(variance))
+                variance = (variance - np.nanmin(variance)) / (1 - np.nanmin(variance))
 
-            weight = np.where(np.isnan(variance), 0, (1- variance)**self.radar_blend)
-            adjusted = weight*adjusted + (1 - weight)*da_rad_threshold
+            weight = np.where(np.isnan(variance), 0, (1 - variance) ** self.radar_blend)
+            adjusted = weight * adjusted + (1 - weight) * da_rad_threshold
 
         # Cap large rainfall estimates
         if self.max_estimate:
-            adjusted = xr.where(adjusted > self.max_estimate, self.max_estimate, adjusted)
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+                "variance": (self.grid_dims, variance.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds
