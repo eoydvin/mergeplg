@@ -61,8 +61,6 @@ ds_rad = xr.Dataset(
 def test_few_obs():
     # Rain gauge
     da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
-
-    # Select radar timestep
     da_rad_t = ds_rad.isel(time=0).R
 
     # Additive
@@ -85,6 +83,37 @@ def test_few_obs():
 
     assert (merged.rainfall.data == da_rad_t.data).all()
     assert np.isnan(merged.variance.data).all()
+
+    # KED  Set some drift so that matrix is not singular
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0)
+    ds_rad_t["R"].data = np.array(
+        [
+            [2.7079736, 2.9399488, 3.0, 3.0],
+            [2.9399488, 2.4661924, 2.9399488, 3.0],
+            [3.0, 5.0, 2.7079736, 3.0],
+            [3.0, 3.0, 3.0, 3.0],
+        ]
+    )
+
+    # Initialize highlevel-class
+    merger = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        nnear=8,
+        min_observations=3,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+    )
+
+    # Adjust field
+    merged = merger(
+        da_rad=ds_rad_t.R,
+        da_gauges=da_gauges_t1,
+    )
+
+    assert (merged.rainfall.data == ds_rad_t.R.data).all()
+    assert np.isnan(merged.variance.data).all()
+
 
 
 def test_max_distance():
