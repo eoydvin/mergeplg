@@ -251,7 +251,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         fill_radar=True,
         range_checks=None,
         max_estimate=150,
-        log_transform=False,
     ):
         """
         Initialize merging object.
@@ -297,10 +296,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         max_estimate: float
             Cell values in adjusted fields above this threshold are truncated to
             max_estimate. Set to False to ignore.
-        log_transform: bool
-            If True, applies the transformation log(1 + Z) to observations before
-            interpolation and the backtransformation exp(G) - 1 to the
-            interpoalted fields.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -324,7 +319,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
         self.max_estimate = max_estimate
-        self.log_transform = log_transform
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -372,8 +366,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
-            diff = np.full_like(obs, np.nan, dtype=np.float64)
-            diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+            diff = np.full_like(obs, np.nan, dtype=np.float32) 
+            diff[mask_zero] = (obs[mask_zero] + 0.01) / (rad[mask_zero] + 0.01)
+            diff = np.where(~np.isnan(diff), np.log(diff), np.nan)
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -390,10 +385,6 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
 
-        # Transform difference
-        if self.log_transform:
-            diff = np.where(~np.isnan(diff), np.log(0.01 + diff), np.nan)
-
         # Interpolate difference
         interpolated = self._interpolator(
             q=coord_pred,
@@ -408,21 +399,16 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             data=interpolated, coords=self.grid_coords, dims=self.grid_dims
         )
 
-        # Backtransform difference
-        if self.log_transform:
-            interpolated = np.where(
-                ~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan
-            )
-
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
             adjusted = xr.where(
                 da_rad_threshold > 0, interpolated + da_rad_threshold, 0
             )
-
+        
         else:  # Multiplicative
+            exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01)*exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
@@ -482,8 +468,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         range_checks=None,
         c0_within=False,
         max_estimate=150,
-        radar_blend=0,
-        log_transform=False,
     ):
         """
         Initialize merging object.
@@ -536,16 +520,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         max_estimate: float
             Cell values in adjusted fields above this threshold are truncated to
             max_estimate. Set to False to ignore.
-        radar_blend: float
-            Blends gauge-adjusted and original radar fields using normalized
-            kriging uncertainty as weight: weight = (1 - variance)^radar_blend.
-                - 0.0 : Always use adjusted field
-                - 1.0 : Linear fallback to radar where uncertainty is high
-                - > 1  : Increasingly conservative; adjustment near observations
-        log_transform: bool
-            If True, applies the transformation log(1 + Z) to observations before
-            interpolation and the backtransformation exp(G) - 1 to the
-            interpoalted fields.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -572,8 +546,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
         self.max_estimate = max_estimate
-        self.radar_blend = radar_blend
-        self.log_transform = log_transform
 
     def __call__(
         self,
@@ -635,7 +607,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float32)
-            diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+            diff[mask_zero] = (obs[mask_zero] + 0.01) / (rad[mask_zero] + 0.01)
+            diff = np.where(~np.isnan(diff), np.log(diff), np.nan)
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -650,10 +623,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             ds["variance"] = xr.full_like(da_rad, np.nan)
             return ds
 
-        # Transform difference
-        if self.log_transform:
-            diff = np.where(~np.isnan(diff), np.log(0.01 + diff), np.nan)
-
         # Interpolate the difference
         interpolated, variance = self._interpolator(diff, sigma)
         interpolated = xr.DataArray(
@@ -667,12 +636,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             dims=self.grid_dims,
         )
 
-        # Backtransform difference
-        if self.log_transform:
-            interpolated = np.where(
-                ~np.isnan(interpolated), np.exp(interpolated) - 0.01, np.nan
-            )
-
         # Adjust radar field where radar is larger than zero
         if self.method == "additive":
             adjusted = xr.where(
@@ -680,8 +643,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             )
 
         else:  # Multiplicative
+            exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01)*exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
@@ -689,19 +653,6 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         # Set gridcells beyond max_distance to nan
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
-
-        # Blend radar and adjusted using kriging uncertainty
-        if self.radar_blend:
-            variance = xr.where(variance > 1, 1, variance)
-            variance = xr.where(variance < 0, 0, variance)
-
-            # If variance high everywhere, use radar
-            if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
-                variance = np.zeros(variance.shape)
-            else:
-                variance = (variance - np.nanmin(variance)) / (1 - np.nanmin(variance))
-            weight = np.where(np.isnan(variance), 0, (1 - variance) ** self.radar_blend)
-            adjusted = weight * adjusted + (1 - weight) * da_rad_threshold
 
         # Cap large rainfall estimates
         if self.max_estimate:
@@ -751,7 +702,6 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         range_checks=None,
         c0_within=False,
         max_estimate=150,
-        radar_blend=0,
     ):
         """
         Initialize merging object.
@@ -801,12 +751,6 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         max_estimate: float
             Cell values in adjusted fields above this threshold are truncated to
             max_estimate. Set to False to ignore.i
-        radar_blend: float
-            Blends gauge-adjusted and original radar fields using normalized
-            kriging uncertainty as weight: weight = (1 - variance)^radar_blend.
-                - 0.0 : Always use adjusted field
-                - 1.0 : Linear fallback to radar where uncertainty is high
-                - > 1  : Increasingly conservative; adjustment near observations
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -832,7 +776,6 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
         self.max_estimate = max_estimate
-        self.radar_blend = radar_blend
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -924,19 +867,6 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
 
         # Set negative estimates and radar below threshold to zero, keeping nan
         adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted)] = 0
-
-        # Blend radar and adjusted using kriging uncertainty
-        if self.radar_blend:
-            variance = xr.where(variance > 1, 1, variance)
-            variance = xr.where(variance < 0, 0, variance)
-            # If variance high or not defined (typically few obs), use radar
-            if (np.nanmin(variance) >= 1) or np.isnan(variance).all():
-                variance = np.zeros(variance.shape)
-            else:
-                variance = (variance - np.nanmin(variance)) / (1 - np.nanmin(variance))
-
-            weight = np.where(np.isnan(variance), 0, (1 - variance) ** self.radar_blend)
-            adjusted = weight * adjusted + (1 - weight) * da_rad_threshold
 
         # Cap large rainfall estimates
         if self.max_estimate:
