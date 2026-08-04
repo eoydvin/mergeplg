@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Module for merging CML and radar data."""
 
 from __future__ import annotations
@@ -6,7 +7,7 @@ import numpy as np
 import poligrain as plg
 import xarray as xr
 
-from mergeplg import bk_functions, interpolate
+from mergeplg import bk_functions, interpolate, radolan
 
 
 class MergeBase:
@@ -888,3 +889,134 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
 
         return ds
+
+
+class MergeRADOLAN(MergeBase):
+    """Merge CML and radar using RADOLAN method
+
+    Merges the provided radar field in ds_rad to CML and rain gauge
+    observations by using the RADOLAN method, which is an inverse distance
+    weighting method with a specific weighting function.
+    """
+
+    def __init__(  # pylint: disable=dangerous-default-value
+        self,
+        ds_rad,
+        ds_cmls=None,
+        ds_gauges=None,
+        grid_location_radar="center",
+        radar_threshold=0.01,
+        nnear=8,
+        max_distance=60000,
+        fill_radar=True,
+        range_checks=None,
+        idw_method="radolan",
+        p=0.7,
+        bogra_kwargs={  # noqa: B006
+            "max_iterations": 100,
+            "max_allowed_relative_diff": 3,
+        },
+    ):
+        """Initialize merging object.
+
+        Parameters
+        ----------
+        ds_rad: xarray.Dataset
+            Dataset providing the grid for merging. Must contain
+            projected x_grid and y_grid coordinates.
+        ds_cmls: xarray.Dataset
+            CML geometry. Must contain the projected midpoint
+            coordinates (x, y).
+        ds_gauges: xarray.Dataset
+            Gauge geometry. Must contain the coordinates projected
+            coordinates (x, y).
+        grid_location_radar: str
+            Position of radar.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
+        idw_method : str
+            With the default ("radolan") an exponential decay with range, as in the
+            original RADOLAN implementation, is used for IDW. When set to "standard"
+            a normal IDW decay with 1/d**p is used.
+        nnear : int
+            Number of nearest neighbors to use for interpolation.
+        p : float
+            The exponent used for "standard" IDW with 1/d**p.
+        max_distance : int or float
+            The maximum distance around a station (or mid-point of a CML) to use
+            for interpolation.
+        bogra_kwargs : dict
+            Parameters for the BOGRA smoothing function, see
+            `adjust.bogra_like_smoothing` for details.
+
+        """
+        MergeBase.__init__(self)
+        self.grid_location_radar = grid_location_radar
+        self.nnear = nnear
+        self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
+        self.max_distance = max_distance
+        self.fill_radar = fill_radar
+        self.range_checks = {} if range_checks is None else range_checks
+        self.idw_method = idw_method
+        self.p = p
+        self.bogra_kwargs = bogra_kwargs
+
+        if ds_cmls is None:
+            self.allow_gauge_and_cml = False
+        else:
+            self.allow_gauge_and_cml = True
+
+    def __call__(
+        self,
+        da_rad,
+        da_cmls=None,
+        da_gauges=None,
+        start_index_in_relevant_stations="random",
+    ):
+        """Adjust radar field for one time step using RADOLAN method
+
+        Parameters
+        ----------
+        da_rad: xarray.DataArray
+            Radar data. Must contain
+            projected x_grid and y_grid coordinates.
+        da_cmls: xarray.DataArray
+            CML observations. Must contain the projected coordinates (site_0_x,
+            site_1_x, site_0_y, site_1_y).
+        da_gauges: xarray.DataArray
+            Gauge observations. Must contain the projected
+            coordinates (x, y).
+        start_index_in_relevant_stations : str or int
+            If set to "random" (which is the default) a random station will be picked as
+            starting point for selecting the audit stations.
+
+        Returns
+        -------
+        da_field_out: xarray.DataArray
+            DataArray with the same structure as the ds_rad but with the
+            interpolated field.
+        """
+        if da_cmls is not None:
+            da_cmls = da_cmls.expand_dims("time")
+        if da_gauges is not None:
+            da_gauges = da_gauges.expand_dims("time")
+        df_stations_t = radolan.io.transform_openmrg_data_for_old_radolan_code(
+            ds_cmls=da_cmls, ds_gauges=da_gauges
+        )
+
+        da_adjusted, _ = radolan.processing.rh_to_rw(
+            ds_radolan_t=da_rad.to_dataset(name="RH"),
+            df_stations_t=df_stations_t,
+            start_index_in_relevant_stations=start_index_in_relevant_stations,
+            idw_method=self.idw_method,
+            nnear=self.nnear,
+            p=self.p,
+            max_distance=self.max_distance,
+            bogra_kwargs=self.bogra_kwargs,
+            allow_gauge_and_cml=self.allow_gauge_and_cml,
+            intersect_weights=self.intersect_weights,
+        )
+
+        return da_adjusted

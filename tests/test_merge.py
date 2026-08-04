@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
 from mergeplg import merge
+
+from .test_radolan_adjust import get_test_data
 
 ds_cmls = xr.Dataset(
     data_vars={
@@ -819,3 +822,142 @@ def test_MergeBlockKrigingExternalDrift():
         ).data
         gauge_r = ds_gauges_t2.sel(id=gauge_id).R.data
         np.testing.assert_almost_equal(merge_r, gauge_r, decimal=8)
+
+
+def test_RADOLAN_merge_equal_to_rh_to_rw():
+    # NOTE: This test replicates test_radolan_processing.test_rh_to_rw but using
+    # the MergeRADOLAN class which calls rh_to_rw after doing some transformations
+    # of data. The expected results are taken from the preexisting test_rh_to_rw.
+
+    ds_radolan, df_stations = get_test_data()
+    RY_sum = ds_radolan.RY.sum(dim="time", min_count=12).to_dataset(name="RH")
+    RY_sum.coords["time"] = ds_radolan.time.values[-1] + pd.Timedelta("5min")
+
+    # add a dummy station outside of the radar coverage to test that interpolated
+    # station data is added in these regions (see test further down below)
+    dummy_station = pd.DataFrame(
+        index=[
+            1,
+        ],
+        data={
+            "time": "2021-08-23 09:50:00",
+            "station_id": "foo",
+            "rainfall_amount": 5.5,
+            "station_name": "le_dummy",
+            "longitude": 1.1,
+            "latitude": 1.1,
+            "x": -420.0,
+            "y": -4500.0,
+        },
+    )
+
+    df_stations = pd.concat([df_stations, dummy_station], ignore_index=True)
+
+    # The following code is used to call rh_to_rw in test_rh_to_rw. We want
+    # to do the same with the MergeRADOLAN class.
+    #
+    # ds_radolan_result, df_stations_result = mrg.radolan.processing.rh_to_rw(
+    #     ds_radolan_t=RY_sum,
+    #     df_stations_t=df_stations,
+    #     idw_method="radolan",
+    #     start_index_in_relevant_stations=0,
+    #     nnear=20,
+    #     max_distance=60,
+    # )
+
+    # Transform the data to the xr.Dataset standard that we can feed into MergeRADOLAN
+    df_stations = df_stations.reset_index().set_index(["time", "station_id"])
+    ds_gauges = (
+        xr.Dataset.from_dataframe(df_stations)
+        .isel(time=0)
+        .set_coords(["x", "y", "longitude", "latitude", "station_name"])
+        .rename({"station_id": "id", "rainfall_amount": "R"})
+        .expand_dims("time")
+    )
+
+    # add grid coordinates needed by merging classes
+    x_grid, y_grid = np.meshgrid(ds_radolan.x.values, ds_radolan.y.values)
+    ds_radolan.coords["x_grid"] = (("y", "x"), x_grid)
+    ds_radolan.coords["y_grid"] = (("y", "x"), y_grid)
+
+    merger = merge.MergeRADOLAN(
+        ds_rad=ds_radolan,
+        ds_gauges=ds_gauges,
+        nnear=20,
+        max_distance=60,
+        idw_method="radolan",
+    )
+
+    ds_radolan_result = merger(
+        da_rad=RY_sum.RH,
+        da_gauges=ds_gauges.R.isel(time=0),
+        start_index_in_relevant_stations=0,
+    )
+
+    np.testing.assert_array_almost_equal(
+        ds_radolan_result.RW.values[420:423, 710:713],
+        np.array(
+            [
+                [4.7, 3.8, 4.0],
+                [4.6, 4.5, 4.1],
+                [5.3, 4.9, 5.1],
+            ]
+        ),
+    )
+
+    np.testing.assert_array_almost_equal(
+        (ds_radolan_result.RW - ds_radolan_result.RH).values[420:423, 710:713],
+        np.array(
+            [
+                [0.33, 0.41, 0.54],
+                [0.33, 0.46, 0.61],
+                [0.42, 0.6, 0.82],
+            ]
+        ),
+    )
+
+    # test that interpolated station data is in the regions where RW would be NaN
+    nan = np.nan
+    np.testing.assert_array_almost_equal(
+        ds_radolan_result.RW.values[118:121, 102:105],
+        np.array(
+            [
+                [nan, nan, nan],
+                [5.5, 5.5, 5.5],
+                [5.5, 5.5, 5.5],
+            ]
+        ),
+    )
+
+
+def test_RADOLAN_merge_with_gauge_and_cml():
+    # Test with dummy data for CML and gauge. Note that this test is not very meaningful
+    # for the RADOLAN method because selecting audit stations only makes sense if there
+    # are enough stations because we take 20% of stations as audit stations. The test
+    # still check that the code runs and results have been verified visually.
+
+    ds_cmls_t = ds_cmls.isel(time=0)
+    ds_gauges_t = ds_gauges.isel(time=0)
+
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0)
+
+    merger = merge.MergeRADOLAN(
+        ds_rad=ds_rad.R,
+        ds_cmls=ds_cmls,
+        max_distance=3,
+        grid_location_radar="lower_left",
+    )
+
+    ds_radolan = merger(
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        start_index_in_relevant_stations=0,
+    )
+
+    # Results checked visually in notebook and values are take from there.
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[1, 2], 5.0)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[0, 3], 4.9)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[3, 3], 9.0)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[2, 0], 4.4)
