@@ -366,7 +366,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
-            diff = np.full_like(obs, np.nan, dtype=np.float32) 
+            diff = np.full_like(obs, np.nan, dtype=np.float32)
             diff[mask_zero] = (obs[mask_zero] + 0.01) / (rad[mask_zero] + 0.01)
             diff = np.where(~np.isnan(diff), np.log(diff), np.nan)
 
@@ -404,17 +404,17 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             adjusted = xr.where(
                 da_rad_threshold > 0, interpolated + da_rad_threshold, 0
             )
-        
+
         else:  # Multiplicative
             exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, (da_rad_threshold + 0.01)*exp_interp - 0.01, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01) * exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
 
-        # Set gridcells beyond max_distance to nan
+        # Reset interpolated nan to nan (i.e. gridcells beyond max distance)
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
 
         # Cap large rainfall estimates
@@ -645,13 +645,13 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         else:  # Multiplicative
             exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, (da_rad_threshold + 0.01)*exp_interp - 0.01, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01) * exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
 
-        # Set gridcells beyond max_distance to nan
+        # Reset interpolated nan to nan (i.e. gridcells beyond max distance)
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
 
         # Cap large rainfall estimates
