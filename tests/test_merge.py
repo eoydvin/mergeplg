@@ -58,6 +58,35 @@ ds_rad = xr.Dataset(
 )
 
 
+def test_few_obs():
+    # Rain gauge
+    da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Select radar timestep
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Additive
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        full_line=False,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        method="additive",
+        max_distance=2,
+        fill_radar=False,
+        min_observations=3,
+    )
+
+    # Test that providing too few RG returns radar and nan variance
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+
+    assert (merged.rainfall.data == da_rad_t.data).all()
+    assert np.isnan(merged.variance.data).all()
+
+
 def test_max_distance():
     # Rain gauge
     da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
