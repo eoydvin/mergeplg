@@ -115,7 +115,6 @@ def test_few_obs():
     assert np.isnan(merged.variance.data).all()
 
 
-
 def test_max_distance():
     # Rain gauge
     da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
