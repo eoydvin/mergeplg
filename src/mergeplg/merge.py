@@ -176,6 +176,9 @@ class MergeBase:
                         stat="best",
                     )
 
+                    # Store gauge names for next check
+                    self.gauge_ids = gauge_id_new
+
     def _apply_range_checks(self, obs, rad, range_checks):
         """
         Apply range checks to observations and radar data.

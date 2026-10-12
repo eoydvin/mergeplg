@@ -115,6 +115,28 @@ def test_few_obs():
     assert np.isnan(merged.variance.data).all()
 
 
+def test_radar_at_gauges_when_gauge_set_changes():
+    # Radar field with a unique value in each pixel
+    da_rad_t = ds_rad.isel(time=0).R.copy()
+    da_rad_t.data = np.arange(16, dtype=float).reshape(4, 4)
+
+    # Two gauge sets of equal size located in different pixels
+    da_gauges_a = ds_gauges.isel(id=[0, 1], time=0).R
+    da_gauges_b = ds_gauges.isel(id=[1, 2], time=0).R
+
+    merger = merge.MergeBase()
+    merger.grid_location_radar = "center"
+
+    # Switch gauge set back and forth, radar must follow the gauges
+    for da_gauges in [da_gauges_a, da_gauges_b, da_gauges_a]:
+        rad = merger._get_rad(da_rad_t, None, da_gauges)
+        expected = [
+            da_rad_t.sel(x=x, y=y).item()
+            for x, y in zip(da_gauges.x.data, da_gauges.y.data, strict=True)
+        ]
+        np.testing.assert_array_equal(rad, expected)
+
+
 def test_max_distance():
     # Rain gauge
     da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
