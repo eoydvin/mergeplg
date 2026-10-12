@@ -342,9 +342,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same coordinates as ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -428,15 +428,15 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        ds = xr.Dataset(
+        ds_field_out = xr.Dataset(
             data_vars={
                 "rainfall": (self.grid_dims, adjusted.data),
             },
             coords=self.grid_coords,
         )
-        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
 
-        return ds
+        return ds_field_out
 
 
 class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, MergeBase):
@@ -580,9 +580,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -665,16 +665,16 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        ds = xr.Dataset(
+        ds_field_out = xr.Dataset(
             data_vars={
                 "rainfall": (self.grid_dims, adjusted.data),
                 "variance": (self.grid_dims, variance.data),
             },
             coords=self.grid_coords,
         )
-        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
 
-        return ds
+        return ds_field_out
 
 
 class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
@@ -824,9 +824,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -879,16 +879,16 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        ds = xr.Dataset(
+        ds_field_out = xr.Dataset(
             data_vars={
                 "rainfall": (self.grid_dims, adjusted.data),
                 "variance": (self.grid_dims, variance.data),
             },
             coords=self.grid_coords,
         )
-        ds.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
 
-        return ds
+        return ds_field_out
 
 
 class MergeRADOLAN(MergeBase):
@@ -994,9 +994,9 @@ class MergeRADOLAN(MergeBase):
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         if da_cmls is not None:
             da_cmls = da_cmls.expand_dims("time")
@@ -1006,7 +1006,7 @@ class MergeRADOLAN(MergeBase):
             ds_cmls=da_cmls, ds_gauges=da_gauges
         )
 
-        da_adjusted, _ = radolan.processing.rh_to_rw(
+        ds_field_out, _ = radolan.processing.rh_to_rw(
             ds_radolan_t=da_rad.to_dataset(name="RH"),
             df_stations_t=df_stations_t,
             start_index_in_relevant_stations=start_index_in_relevant_stations,
@@ -1019,4 +1019,6 @@ class MergeRADOLAN(MergeBase):
             intersect_weights=self.intersect_weights,
         )
 
-        return da_adjusted
+        ds_field_out["rainfall"] = ds_field_out.RW.copy()
+
+        return ds_field_out
