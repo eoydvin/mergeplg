@@ -371,7 +371,7 @@ class InterpolateKrigingBase(InterpolatorBase):
             if da_gauges_sigma is not None:
                 sigma_gauges = da_gauges_sigma.data.ravel()
             else:
-                sigma_gauges = np.zeros(obs_gauges.size)
+                sigma_gauges = np.full(obs_gauges.size, np.nan)
         else:
             obs_gauges = []
             sigma_gauges = []
@@ -381,12 +381,13 @@ class InterpolateKrigingBase(InterpolatorBase):
             if da_cmls_sigma is not None:
                 sigma_cmls = da_cmls_sigma.data.ravel()
             else:
-                sigma_cmls = np.zeros(obs_cmls.size)
+                sigma_cmls = np.full(obs_cmls.size, np.nan)
         else:
             obs_cmls = []
             sigma_cmls = []
 
-        # Stack observations and sigma in the order expected by interpolator
+        # Stack observations and sigma in the order expected by interpolator.
+        # Nan sigma falls back to the variogram nugget in the interpolator.
         obs = np.concatenate([obs_cmls, obs_gauges]).astype(float)
         sigma = np.concatenate([sigma_cmls, sigma_gauges]).astype(float)
 
@@ -441,11 +442,13 @@ class InterpolateOrdinaryKriging(InterpolateKrigingBase):
             Gauge observations. Must contain the projected
             coordinates (x, y).
         da_gauges_sigma: xarray.DataArray
-            Gauge uncertainties corresponding to the data in ds_gauges. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
-        da_cmls_sigma: xarray.DataAarray
-            CML uncertainties corresponding to the data in ds_cmls. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+            Error variance of the gauge observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
+        da_cmls_sigma: xarray.DataArray
+            Error variance of the CML observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
 
         Returns
         -------

@@ -574,12 +574,16 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         da_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        da_cmls_sigma: xarray.DataAarray
-            CML uncertainties corresponding to the data in ds_cmls. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+        da_cmls_sigma: xarray.DataArray
+            Error variance of the CML observations (variance of the ground-radar
+            difference, or of its log for method='multiplicative'). Replaces
+            the variogram nugget for these observations. If set to None, or
+            where nan, the nugget is used.
         da_gauges_sigma: xarray.DataArray
-            Gauge uncertainties corresponding to the data in ds_gauges. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+            Error variance of the gauge observations (variance of the ground-radar
+            difference, or of its log for method='multiplicative'). Replaces
+            the variogram nugget for these observations. If set to None, or
+            where nan, the nugget is used.
 
         Returns
         -------
@@ -818,12 +822,14 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         da_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        da_cmls_sigma: xarray.DataAarray
-            CML uncertainties corresponding to the data in ds_cmls. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+        da_cmls_sigma: xarray.DataArray
+            Error variance of the CML observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
         da_gauges_sigma: xarray.DataArray
-            Gauge uncertainties corresponding to the data in ds_gauges. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+            Error variance of the gauge observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
 
         Returns
         -------
