@@ -75,13 +75,13 @@ def test_few_obs():
         min_observations=3,
     )
 
-    # Test that providing too few RG returns radar and nan variance
+    # Test that providing too few RG returns nan, as fill_radar is False
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
     )
 
-    assert (merged.rainfall.data == da_rad_t.data).all()
+    assert np.isnan(merged.rainfall.data).all()
     assert np.isnan(merged.variance.data).all()
 
     # KED  Set some drift so that matrix is not singular
@@ -113,6 +113,44 @@ def test_few_obs():
 
     assert (merged.rainfall.data == ds_rad_t.R.data).all()
     assert np.isnan(merged.variance.data).all()
+
+
+@pytest.mark.parametrize(
+    "merge_class",
+    [
+        merge.MergeDifferenceIDW,
+        merge.MergeDifferenceOrdinaryKriging,
+        merge.MergeKrigingExternalDrift,
+    ],
+)
+@pytest.mark.parametrize("fill_radar", [True, False])
+def test_few_obs_fill_radar(merge_class, fill_radar):
+    # Two gauges, too few for min_observations=3
+    da_gauges_t = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Radar with values below radar_threshold, these are kept unadjusted
+    da_rad_t = ds_rad.isel(time=0).R.copy()
+    da_rad_t.data = np.full((4, 4), 0.005)
+    da_rad_t.data[1:3, 1:3] = 2.0
+
+    merger = merge_class(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        min_observations=3,
+        radar_threshold=0.01,
+        fill_radar=fill_radar,
+    )
+    merged = merger(da_rad_t, da_gauges=da_gauges_t)
+
+    if fill_radar:
+        # Unadjusted radar is returned
+        np.testing.assert_array_equal(merged.rainfall.data, da_rad_t.data)
+    else:
+        # Grid of nan is returned
+        assert merged.rainfall.shape == da_rad_t.shape
+        assert np.isnan(merged.rainfall.data).all()
+    if "variance" in merged:
+        assert np.isnan(merged.variance.data).all()
 
 
 def test_radar_at_gauges_when_gauge_set_changes():

@@ -52,6 +52,18 @@ class InterpolatorBase:
             raise ValueError(msg)
         return time
 
+    def _nan_dataset(self, data_vars, time):
+        """Return dataset with grids of nan for the given data variables"""
+        ds = xr.Dataset(
+            data_vars={
+                name: (self.grid_dims, np.full(self.x_grid.shape, np.nan))
+                for name in data_vars
+            },
+            coords=self.grid_coords,
+        )
+        ds.coords["time"] = time
+        return ds
+
     def _maybe_update_interpolator(self, y_grid, x_grid, ds_cmls, ds_gauges):
         """Update observations and interpolator
 
@@ -171,8 +183,9 @@ class InterpolateIDW(InterpolatorBase):
         ds_gauges: xarray.Dataset
             Gauge geometry. Must contain the coordinates projected
             coordinates (x, y).
-        min_observations:
-            Number of observations needed to perform interpolation.
+        min_observations: int
+            Interpolation requires more than min_observations valid
+            observations. Otherwise a grid of nan is returned.
         p: float
             Tuning parameter for idw_method = standard.
         idw_method: str
@@ -258,13 +271,9 @@ class InterpolateIDW(InterpolatorBase):
 
         # If few observations return nan grid
         if (~np.isnan(observations)).sum() <= self.min_observations:
-            da = xr.DataArray(
-                data=np.full_like(self.x_grid, np.nan),
-                coords=self.grid_coords,
-                dims=self.grid_dims,
+            return self._nan_dataset(
+                ["rainfall"], self._get_timestamp(da_cmls, da_gauges)
             )
-            da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-            return da
 
         # IDW interpolator
         interpolated = self._interpolator(
@@ -325,8 +334,9 @@ class InterpolateKrigingBase(InterpolatorBase):
             Must be a valid parameters corresponding to variogram_model.
         discretization: int
             Number of points to divide the line into.
-        min_observations:
-            Number of observations needed to perform interpolation.
+        min_observations: int
+            Interpolation requires more than min_observations valid
+            observations. Otherwise a grid of nan is returned.
         nnear: int
             Number of closest links to use for interpolation
         max_distance: float
@@ -468,13 +478,9 @@ class InterpolateOrdinaryKriging(InterpolateKrigingBase):
 
         # If few observations return grid of nans
         if (~np.isnan(obs)).sum() <= self.min_observations:
-            da = xr.DataArray(
-                data=np.full_like(self.x_grid, np.nan),
-                coords=self.grid_coords,
-                dims=self.grid_dims,
+            return self._nan_dataset(
+                ["rainfall", "variance"], self._get_timestamp(da_cmls, da_gauges)
             )
-            da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-            return da
 
         # Interpolate
         interpolated, variance = self._interpolator(obs, sigma)

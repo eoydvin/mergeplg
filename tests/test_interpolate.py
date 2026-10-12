@@ -570,3 +570,28 @@ def test_kud_missing_sigma_falls_back_to_nugget(method):
     for result in [sigma_nugget, sigma_nan]:
         np.testing.assert_allclose(result.rainfall, reference.rainfall)
         np.testing.assert_allclose(result.variance, reference.variance)
+
+
+@pytest.mark.parametrize(
+    ("interpolator_class", "data_vars"),
+    [
+        (interpolate.InterpolateIDW, ["rainfall"]),
+        (interpolate.InterpolateOrdinaryKriging, ["rainfall", "variance"]),
+    ],
+)
+def test_few_obs_returns_nan_dataset(interpolator_class, data_vars):
+    # Two gauges, too few for min_observations=3
+    ds_gauges_t = ds_gauges.isel(id=[0, 1], time=0)
+    interpolator = interpolator_class(
+        ds_grid=ds_rad,
+        ds_gauges=ds_gauges_t,
+        min_observations=3,
+    )
+    interpolated = interpolator(da_gauges=ds_gauges_t.R)
+
+    # Same output structure as when interpolating, with nan in all cells
+    assert isinstance(interpolated, xr.Dataset)
+    for name in data_vars:
+        assert interpolated[name].shape == ds_rad.x_grid.shape
+        assert np.isnan(interpolated[name].data).all()
+    assert interpolated.time == ds_gauges_t.time

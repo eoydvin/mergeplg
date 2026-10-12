@@ -271,8 +271,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             coordinates (x, y).
         grid_location_radar: str
             Position of radar.
-        min_observations:
-            Number of observations needed to perform interpolation.
+        min_observations: int
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         p: float
             Tuning parameter for idw_method = standard.
         idw_method: str
@@ -286,10 +288,14 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             multiplicative, performs multiplicative merging.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -382,9 +388,13 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
         diff[flagged] = np.nan  # ignored in interpolator
 
-        # If few observations return radar grid
+        # If few observations return radar grid, or nan grid if not fill_radar
         if (~np.isnan(diff)).sum() <= self.min_observations:
-            return da_rad.to_dataset(name="rainfall")
+            if self.fill_radar:
+                return da_rad.to_dataset(name="rainfall")
+            return self._nan_dataset(
+                ["rainfall"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
@@ -494,7 +504,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         discretization: int
             Number of points to divide the line into.
         min_observations: int
-            Number of observations needed to perform interpolation.
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
@@ -507,10 +519,14 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -625,11 +641,15 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Flag indices based on user defined thresholds
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
         diff[flagged] = np.nan  # ignored in interpolator
-        # If few observations return the radar grid
+        # If few observations return radar grid, or nan grid if not fill_radar
         if (~np.isnan(diff)).sum() <= self.min_observations:
-            ds = da_rad.to_dataset(name="rainfall")
-            ds["variance"] = xr.full_like(da_rad, np.nan)
-            return ds
+            if self.fill_radar:
+                ds = da_rad.to_dataset(name="rainfall")
+                ds["variance"] = xr.full_like(da_rad, np.nan, dtype=float)
+                return ds
+            return self._nan_dataset(
+                ["rainfall", "variance"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # Interpolate the difference
         interpolated, variance = self._interpolator(diff, sigma)
@@ -732,7 +752,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         discretization: int
             Number of points to divide the line into.
         min_observations: int
-            Number of observations needed to perform interpolation.
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         nnear: int
             Number of closest links to use for interpolation
         max_distance: float
@@ -742,10 +764,14 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -859,11 +885,15 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | flagged
         obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
-        # If few observations return radar
+        # If few observations return radar grid, or nan grid if not fill_radar
         if (~np.isnan(obs)).sum() <= self.min_observations:
-            ds = da_rad.to_dataset(name="rainfall")
-            ds["variance"] = xr.full_like(da_rad, np.nan)
-            return ds
+            if self.fill_radar:
+                ds = da_rad.to_dataset(name="rainfall")
+                ds["variance"] = xr.full_like(da_rad, np.nan, dtype=float)
+                return ds
+            return self._nan_dataset(
+                ["rainfall", "variance"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # KED merging
         adjusted, variance = self._interpolator(
