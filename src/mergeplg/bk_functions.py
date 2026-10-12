@@ -138,14 +138,14 @@ class OBKrigTree:
         mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
         # Midpoint coordinates of observations
-        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        x_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
         xgrid = x_grid.ravel()
         ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours, strict=False))
+            data=list(zip(y_neighbours, x_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
@@ -391,14 +391,14 @@ class BKEDTree:
         mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
 
         # Midpoint coordinates of observations
-        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        x_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
         xgrid = x_grid.ravel()
         ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours, strict=False))
+            data=list(zip(y_neighbours, x_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
