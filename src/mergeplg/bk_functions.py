@@ -1,7 +1,7 @@
-"""
-Created on Fri Oct 18 20:21:53 2024
+"""Block kriging functions
 
-@author: erlend
+Provides classes and functions for ordinary block kriging (OBK) interpolation
+and Block kriging with external drift merging using KDTree.
 """
 
 import numpy as np

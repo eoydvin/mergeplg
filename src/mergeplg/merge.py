@@ -1,5 +1,8 @@
 # pylint: disable=too-many-lines
-"""Module for merging CML and radar data."""
+"""Merging classes
+
+Provides base and derived classes for merging point, line, and gridded data.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""Module for merging CML and radar data."""
+"""Interpolation classes
+
+Provides base and derived classes for spatial interpolation of point and line data.
+"""
 
 from __future__ import annotations
 

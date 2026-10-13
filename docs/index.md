@@ -13,6 +13,13 @@ notebooks/OpenRainER_case_highlevel.ipynb
 notebooks/openMRG_case_RADOLAN.ipynb
 ```
 
+```{toctree}
+:caption: API Reference
+:hidden:
+
+api
+```
+
 ## Build Information
 
 ```{eval-rst}
