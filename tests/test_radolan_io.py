@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.testing as npt
+import pytest
 
 import mergeplg as mrg
 
@@ -13,7 +14,7 @@ def test_transform_openmrg_data_for_old_radolan_code():
     ) = mrg.io.load_and_transform_openmrg_data()
     df_cmls = mrg.radolan.io.transform_openmrg_data_for_old_radolan_code(ds_cmls)
 
-    assert df_cmls.sensor_type.iloc[0] == "cml_ericsson"
+    assert df_cmls.sensor_type.iloc[0] == "cml"
 
     npt.assert_equal(
         df_cmls.station_id.iloc[30:32].to_numpy(), np.array([10031, 10032])
@@ -31,3 +32,12 @@ def test_transform_openmrg_data_for_old_radolan_code():
             dtype="datetime64[ns]",
         ),
     )
+
+
+def test_transform_openmrg_data_for_old_radolan_code_raises_error_if_no_data():
+    with pytest.raises(
+        ValueError, match=r"At least one of ds_cmls and ds_gauges must be provided."
+    ):
+        mrg.radolan.io.transform_openmrg_data_for_old_radolan_code(
+            ds_cmls=None, ds_gauges=None
+        )

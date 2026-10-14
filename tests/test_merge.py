@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
 from mergeplg import merge
+
+from .test_radolan_adjust import get_test_data
 
 ds_cmls = xr.Dataset(
     data_vars={
@@ -55,6 +58,123 @@ ds_rad = xr.Dataset(
 )
 
 
+def test_few_obs():
+    # Rain gauge
+    da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
+    da_rad_t = ds_rad.isel(time=0).R
+
+    # Additive
+    merger = merge.MergeDifferenceOrdinaryKriging(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        full_line=False,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+        method="additive",
+        max_distance=2,
+        fill_radar=False,
+        min_observations=3,
+    )
+
+    # Test that providing too few RG returns nan, as fill_radar is False
+    merged = merger(
+        da_rad_t,
+        da_gauges=da_gauges_t1,
+    )
+
+    assert np.isnan(merged.rainfall.data).all()
+    assert np.isnan(merged.variance.data).all()
+
+    # KED  Set some drift so that matrix is not singular
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0)
+    ds_rad_t["R"].data = np.array(
+        [
+            [2.7079736, 2.9399488, 3.0, 3.0],
+            [2.9399488, 2.4661924, 2.9399488, 3.0],
+            [3.0, 5.0, 2.7079736, 3.0],
+            [3.0, 3.0, 3.0, 3.0],
+        ]
+    )
+
+    # Initialize highlevel-class
+    merger = merge.MergeKrigingExternalDrift(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        nnear=8,
+        min_observations=3,
+        variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
+    )
+
+    # Adjust field
+    merged = merger(
+        da_rad=ds_rad_t.R,
+        da_gauges=da_gauges_t1,
+    )
+
+    assert (merged.rainfall.data == ds_rad_t.R.data).all()
+    assert np.isnan(merged.variance.data).all()
+
+
+@pytest.mark.parametrize(
+    "merge_class",
+    [
+        merge.MergeDifferenceIDW,
+        merge.MergeDifferenceOrdinaryKriging,
+        merge.MergeKrigingExternalDrift,
+    ],
+)
+@pytest.mark.parametrize("fill_radar", [True, False])
+def test_few_obs_fill_radar(merge_class, fill_radar):
+    # Two gauges, too few for min_observations=3
+    da_gauges_t = ds_gauges.isel(id=[0, 1], time=0).R
+
+    # Radar with values below radar_threshold, these are kept unadjusted
+    da_rad_t = ds_rad.isel(time=0).R.copy()
+    da_rad_t.data = np.full((4, 4), 0.005)
+    da_rad_t.data[1:3, 1:3] = 2.0
+
+    merger = merge_class(
+        ds_rad=ds_rad,
+        ds_gauges=ds_gauges,
+        min_observations=3,
+        radar_threshold=0.01,
+        fill_radar=fill_radar,
+    )
+    merged = merger(da_rad_t, da_gauges=da_gauges_t)
+
+    if fill_radar:
+        # Unadjusted radar is returned
+        np.testing.assert_array_equal(merged.rainfall.data, da_rad_t.data)
+    else:
+        # Grid of nan is returned
+        assert merged.rainfall.shape == da_rad_t.shape
+        assert np.isnan(merged.rainfall.data).all()
+    if "variance" in merged:
+        assert np.isnan(merged.variance.data).all()
+
+
+def test_radar_at_gauges_when_gauge_set_changes():
+    # Radar field with a unique value in each pixel
+    da_rad_t = ds_rad.isel(time=0).R.copy()
+    da_rad_t.data = np.arange(16, dtype=float).reshape(4, 4)
+
+    # Two gauge sets of equal size located in different pixels
+    da_gauges_a = ds_gauges.isel(id=[0, 1], time=0).R
+    da_gauges_b = ds_gauges.isel(id=[1, 2], time=0).R
+
+    merger = merge.MergeBase()
+    merger.grid_location_radar = "center"
+
+    # Switch gauge set back and forth, radar must follow the gauges
+    for da_gauges in [da_gauges_a, da_gauges_b, da_gauges_a]:
+        rad = merger._get_rad(da_rad_t, None, da_gauges)
+        expected = [
+            da_rad_t.sel(x=x, y=y).item()
+            for x, y in zip(da_gauges.x.data, da_gauges.y.data, strict=True)
+        ]
+        np.testing.assert_array_equal(rad, expected)
+
+
 def test_max_distance():
     # Rain gauge
     da_gauges_t1 = ds_gauges.isel(id=[0, 1], time=0).R
@@ -71,13 +191,14 @@ def test_max_distance():
         method="additive",
         max_distance=2,
         fill_radar=False,
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
 
     # Gauges located at (1, 1) and (0, 1) are within all cells
     # (by 2 units) for all gridcells, except the lower row y=-1
@@ -98,13 +219,14 @@ def test_multiplicative_additiveKriging():
         full_line=False,
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
         method="additive",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -124,13 +246,14 @@ def test_multiplicative_additiveKriging():
         method="multiplicative",
         variogram_parameters={"sill": 1, "range": 1, "nugget": 0},
         full_line=False,
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -154,7 +277,7 @@ def test_multiplicative_additiveKriging():
         merged = merger(
             da_rad_t,
             da_gauges=da_gauges_t1,
-        )
+        ).rainfall
 
 
 def test_multiplicative_additiveIDW():
@@ -169,13 +292,14 @@ def test_multiplicative_additiveIDW():
         ds_rad=ds_rad,
         ds_gauges=ds_gauges,
         method="additive",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -193,13 +317,14 @@ def test_multiplicative_additiveIDW():
         ds_rad=ds_rad,
         ds_gauges=ds_gauges,
         method="multiplicative",
+        min_observations=1,
     )
 
     # Test that providing only RG works
     merged = merger(
         da_rad_t,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
     for gauge_id in da_gauges_t1.id:
         merge_r = merged.sel(
             x=da_gauges_t1.sel(id=gauge_id).x.data,
@@ -223,7 +348,7 @@ def test_multiplicative_additiveIDW():
         merged = merger(
             da_rad_t,
             da_gauges=da_gauges_t1,
-        )
+        ).rainfall
 
 
 def test_obk_filter():
@@ -251,7 +376,7 @@ def test_obk_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -283,7 +408,7 @@ def test_obk_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -327,7 +452,7 @@ def test_idw_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -359,7 +484,7 @@ def test_idw_filter():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Test that first obs is accounted for
     merge_r = adjusted.sel(
@@ -403,7 +528,7 @@ def test_MergeDifferenceIDW():
         da_rad=da_rad_t,
         da_cmls=da_cml_t1,
         da_gauges=da_gauges_t1,
-    )
+    ).rainfall
 
     # Check CMLs
     for cml_id in da_cml_t1.cml_id:
@@ -428,7 +553,7 @@ def test_MergeDifferenceIDW():
         da_rad=da_rad_t,
         da_cmls=da_cml_t2,
         da_gauges=da_gauges_t2,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == da_cml_t2.cml_id).all()
@@ -464,7 +589,7 @@ def test_MergeDifferenceIDW():
     adjusted = merger(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t2,
-    )
+    ).rainfall
 
     # Check that field is fit to gauges
     for id in da_gauges_t2.id:
@@ -503,7 +628,7 @@ def test_MergeDifferenceOrdinaryKriging_c0():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
@@ -547,7 +672,7 @@ def test_MergeDifferenceOrdinaryKriging():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
@@ -592,7 +717,7 @@ def test_MergeDifferenceOrdinaryKriging():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t2.R,
         da_gauges=ds_gauges_t2.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()
@@ -668,7 +793,7 @@ def test_MergeBlockKrigingExternalDrift_c0():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # test that the adjusted field is the same as first run
     data_check = np.array(
@@ -720,7 +845,7 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t.R,
         da_gauges=ds_gauges_t.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t.cml_id).all()
@@ -775,7 +900,7 @@ def test_MergeBlockKrigingExternalDrift():
         da_rad=ds_rad_t.R,
         da_cmls=ds_cmls_t2.R,
         da_gauges=ds_gauges_t2.R,
-    )
+    ).rainfall
 
     # Test that CML names is correctly updated and sorted in the class
     assert (merger.intersect_weights.cml_id == ds_cmls_t2.cml_id).all()
@@ -814,3 +939,142 @@ def test_MergeBlockKrigingExternalDrift():
         ).data
         gauge_r = ds_gauges_t2.sel(id=gauge_id).R.data
         np.testing.assert_almost_equal(merge_r, gauge_r, decimal=8)
+
+
+def test_RADOLAN_merge_equal_to_rh_to_rw():
+    # NOTE: This test replicates test_radolan_processing.test_rh_to_rw but using
+    # the MergeRADOLAN class which calls rh_to_rw after doing some transformations
+    # of data. The expected results are taken from the preexisting test_rh_to_rw.
+
+    ds_radolan, df_stations = get_test_data()
+    RY_sum = ds_radolan.RY.sum(dim="time", min_count=12).to_dataset(name="RH")
+    RY_sum.coords["time"] = ds_radolan.time.values[-1] + pd.Timedelta("5min")
+
+    # add a dummy station outside of the radar coverage to test that interpolated
+    # station data is added in these regions (see test further down below)
+    dummy_station = pd.DataFrame(
+        index=[
+            1,
+        ],
+        data={
+            "time": "2021-08-23 09:50:00",
+            "station_id": "foo",
+            "rainfall_amount": 5.5,
+            "station_name": "le_dummy",
+            "longitude": 1.1,
+            "latitude": 1.1,
+            "x": -420.0,
+            "y": -4500.0,
+        },
+    )
+
+    df_stations = pd.concat([df_stations, dummy_station], ignore_index=True)
+
+    # The following code is used to call rh_to_rw in test_rh_to_rw. We want
+    # to do the same with the MergeRADOLAN class.
+    #
+    # ds_radolan_result, df_stations_result = mrg.radolan.processing.rh_to_rw(
+    #     ds_radolan_t=RY_sum,
+    #     df_stations_t=df_stations,
+    #     idw_method="radolan",
+    #     start_index_in_relevant_stations=0,
+    #     nnear=20,
+    #     max_distance=60,
+    # )
+
+    # Transform the data to the xr.Dataset standard that we can feed into MergeRADOLAN
+    df_stations = df_stations.reset_index().set_index(["time", "station_id"])
+    ds_gauges = (
+        xr.Dataset.from_dataframe(df_stations)
+        .isel(time=0)
+        .set_coords(["x", "y", "longitude", "latitude", "station_name"])
+        .rename({"station_id": "id", "rainfall_amount": "R"})
+        .expand_dims("time")
+    )
+
+    # add grid coordinates needed by merging classes
+    x_grid, y_grid = np.meshgrid(ds_radolan.x.values, ds_radolan.y.values)
+    ds_radolan.coords["x_grid"] = (("y", "x"), x_grid)
+    ds_radolan.coords["y_grid"] = (("y", "x"), y_grid)
+
+    merger = merge.MergeRADOLAN(
+        ds_rad=ds_radolan,
+        ds_gauges=ds_gauges,
+        nnear=20,
+        max_distance=60,
+        idw_method="radolan",
+    )
+
+    ds_radolan_result = merger(
+        da_rad=RY_sum.RH,
+        da_gauges=ds_gauges.R.isel(time=0),
+        start_index_in_relevant_stations=0,
+    )
+
+    np.testing.assert_array_almost_equal(
+        ds_radolan_result.RW.values[420:423, 710:713],
+        np.array(
+            [
+                [4.7, 3.8, 4.0],
+                [4.6, 4.5, 4.1],
+                [5.3, 4.9, 5.1],
+            ]
+        ),
+    )
+
+    np.testing.assert_array_almost_equal(
+        (ds_radolan_result.RW - ds_radolan_result.RH).values[420:423, 710:713],
+        np.array(
+            [
+                [0.33, 0.41, 0.54],
+                [0.33, 0.46, 0.61],
+                [0.42, 0.6, 0.82],
+            ]
+        ),
+    )
+
+    # test that interpolated station data is in the regions where RW would be NaN
+    nan = np.nan
+    np.testing.assert_array_almost_equal(
+        ds_radolan_result.RW.values[118:121, 102:105],
+        np.array(
+            [
+                [nan, nan, nan],
+                [5.5, 5.5, 5.5],
+                [5.5, 5.5, 5.5],
+            ]
+        ),
+    )
+
+
+def test_RADOLAN_merge_with_gauge_and_cml():
+    # Test with dummy data for CML and gauge. Note that this test is not very meaningful
+    # for the RADOLAN method because selecting audit stations only makes sense if there
+    # are enough stations because we take 20% of stations as audit stations. The test
+    # still check that the code runs and results have been verified visually.
+
+    ds_cmls_t = ds_cmls.isel(time=0)
+    ds_gauges_t = ds_gauges.isel(time=0)
+
+    # Select radar timestep
+    ds_rad_t = ds_rad.isel(time=0)
+
+    merger = merge.MergeRADOLAN(
+        ds_rad=ds_rad.R,
+        ds_cmls=ds_cmls,
+        max_distance=3,
+        grid_location_radar="lower_left",
+    )
+
+    ds_radolan = merger(
+        da_rad=ds_rad_t.R,
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        start_index_in_relevant_stations=0,
+    )
+
+    # Results checked visually in notebook and values are take from there.
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[1, 2], 5.0)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[0, 3], 4.9)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[3, 3], 9.0)
+    np.testing.assert_array_almost_equal(ds_radolan.RW.values[2, 0], 4.4)

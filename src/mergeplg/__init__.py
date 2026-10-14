@@ -1,6 +1,7 @@
-"""Copyright (c) 2024 Christian Chwala. All rights reserved.
+"""mergeplg: merging of point, line, and gridded rainfall data.
 
-mergeplg: A great package.
+The package provides interpolation and merging routines to combine
+point (gauge) and line (CML) rainfall observations with radar fields.
 """
 
 from __future__ import annotations

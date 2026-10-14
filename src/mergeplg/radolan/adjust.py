@@ -293,7 +293,7 @@ def interpolate_station_values(
         df_stations_temp.loc[~z.isna(), ["x", "y"]].values
     )
     if np.all(np.isnan(z)):
-        zi = np.empty_like(x_grid)
+        zi = np.empty_like(x_grid, dtype="float")
         zi[:] = np.nan
     else:
         zi = idw_interpolator(

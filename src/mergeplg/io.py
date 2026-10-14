@@ -1,4 +1,4 @@
-"""Functions to load data"""
+"""Functions to load data and transform example datasets"""
 
 from importlib.resources import files as importlib_files
 from pathlib import Path

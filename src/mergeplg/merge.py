@@ -1,4 +1,8 @@
-"""Module for merging CML and radar data."""
+# pylint: disable=too-many-lines
+"""Merging classes
+
+Provides base and derived classes for merging point, line, and gridded data.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ import numpy as np
 import poligrain as plg
 import xarray as xr
 
-from mergeplg import bk_functions, interpolate
+from mergeplg import bk_functions, interpolate, radolan
 
 
 class MergeBase:
@@ -175,6 +179,9 @@ class MergeBase:
                         stat="best",
                     )
 
+                    # Store gauge names for next check
+                    self.gauge_ids = gauge_id_new
+
     def _apply_range_checks(self, obs, rad, range_checks):
         """
         Apply range checks to observations and radar data.
@@ -241,7 +248,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         ds_cmls=None,
         ds_gauges=None,
         grid_location_radar="center",
-        min_observations=1,
+        min_observations=3,
         p=2,
         idw_method="standard",
         nnear=8,
@@ -250,6 +257,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         radar_threshold=0.01,
         fill_radar=True,
         range_checks=None,
+        max_estimate=150,
     ):
         """
         Initialize merging object.
@@ -266,8 +274,10 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             coordinates (x, y).
         grid_location_radar: str
             Position of radar.
-        min_observations:
-            Number of observations needed to perform interpolation.
+        min_observations: int
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         p: float
             Tuning parameter for idw_method = standard.
         idw_method: str
@@ -281,10 +291,14 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             multiplicative, performs multiplicative merging.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -292,6 +306,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
                 - If None, no range checks are applied.
             For example, {'diff_check': 10, 'ratio_check': (0.1, 15)}
             applies a difference limit of 10 and a ratio range of 0.1 to 15.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.
         """
         # Init interpolation
         interpolate.InterpolateIDW.__init__(
@@ -314,6 +331,7 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
 
     def __call__(self, da_rad, da_cmls=None, da_gauges=None):
         """Interpolate observations for one time step using IDW
@@ -336,9 +354,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same coordinates as ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -361,8 +379,9 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
 
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
-            diff = np.full_like(obs, np.nan, dtype=np.float64)
-            diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+            diff = np.full_like(obs, np.nan, dtype=np.float32)
+            diff[mask_zero] = (obs[mask_zero] + 0.01) / (rad[mask_zero] + 0.01)
+            diff = np.where(~np.isnan(diff), np.log(diff), np.nan)
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -372,9 +391,13 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
         diff[flagged] = np.nan  # ignored in interpolator
 
-        # If few observations return radar grid
-        if (~np.isnan(flagged)).sum() <= self.min_observations:
-            return da_rad
+        # If few observations return radar grid, or nan grid if not fill_radar
+        if (~np.isnan(diff)).sum() <= self.min_observations:
+            if self.fill_radar:
+                return da_rad.to_dataset(name="rainfall")
+            return self._nan_dataset(
+                ["rainfall"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # Coordinates to predict
         coord_pred = np.hstack([self.y_grid.reshape(-1, 1), self.x_grid.reshape(-1, 1)])
@@ -400,23 +423,36 @@ class MergeDifferenceIDW(interpolate.InterpolateIDW, MergeBase):
             )
 
         else:  # Multiplicative
+            exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01) * exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
 
-        # Set gridcells beyond max_distance to nan
+        # Reset interpolated nan to nan (i.e. gridcells beyond max distance)
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds_field_out = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds_field_out
 
 
 class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, MergeBase):
@@ -439,7 +475,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=1,
+        min_observations=3,
         method="additive",
         nnear=8,
         max_distance=60000,
@@ -448,6 +484,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         fill_radar=True,
         range_checks=None,
         c0_within=False,
+        max_estimate=150,
     ):
         """
         Initialize merging object.
@@ -470,7 +507,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         discretization: int
             Number of points to divide the line into.
         min_observations: int
-            Number of observations needed to perform interpolation.
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         method: str
             If set to additive, performs additive merging. If set to
             multiplicative, performs multiplicative merging.
@@ -483,10 +522,14 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -497,6 +540,9 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         c0_within: bool
             If True, estimate observation uncertainty using withinblock variance,
             False (default) uses variogram nugget.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.
         """
         # Init interpolator
         interpolate.InterpolateOrdinaryKriging.__init__(
@@ -522,6 +568,7 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
 
     def __call__(
         self,
@@ -546,18 +593,22 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         da_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        da_cmls_sigma: xarray.DataAarray
-            CML uncertainties corresponding to the data in ds_cmls. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+        da_cmls_sigma: xarray.DataArray
+            Error variance of the CML observations (variance of the ground-radar
+            difference, or of its log for method='multiplicative'). Replaces
+            the variogram nugget for these observations. If set to None, or
+            where nan, the nugget is used.
         da_gauges_sigma: xarray.DataArray
-            Gauge uncertainties corresponding to the data in ds_gauges. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+            Error variance of the gauge observations (variance of the ground-radar
+            difference, or of its log for method='multiplicative'). Replaces
+            the variogram nugget for these observations. If set to None, or
+            where nan, the nugget is used.
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -583,7 +634,8 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         elif self.method == "multiplicative":
             mask_zero = rad > 0.0
             diff = np.full_like(obs, np.nan, dtype=np.float32)
-            diff[mask_zero] = obs[mask_zero] / rad[mask_zero]
+            diff[mask_zero] = (obs[mask_zero] + 0.01) / (rad[mask_zero] + 0.01)
+            diff = np.where(~np.isnan(diff), np.log(diff), np.nan)
 
         else:
             msg = "Method must be multiplicative or additive"
@@ -592,15 +644,27 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
         # Flag indices based on user defined thresholds
         flagged = self._apply_range_checks(obs, rad, self.range_checks)
         diff[flagged] = np.nan  # ignored in interpolator
-
-        # If few observations return the radar grid
+        # If few observations return radar grid, or nan grid if not fill_radar
         if (~np.isnan(diff)).sum() <= self.min_observations:
-            return da_rad
+            if self.fill_radar:
+                ds = da_rad.to_dataset(name="rainfall")
+                ds["variance"] = xr.full_like(da_rad, np.nan, dtype=float)
+                return ds
+            return self._nan_dataset(
+                ["rainfall", "variance"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # Interpolate the difference
-        interpolated = self._interpolator(diff, sigma).reshape(self.x_grid.shape)
+        interpolated, variance = self._interpolator(diff, sigma)
         interpolated = xr.DataArray(
-            data=interpolated, coords=self.grid_coords, dims=self.grid_dims
+            data=interpolated.reshape(self.x_grid.shape),
+            coords=self.grid_coords,
+            dims=self.grid_dims,
+        )
+        variance = xr.DataArray(
+            data=variance.reshape(self.x_grid.shape),
+            coords=self.grid_coords,
+            dims=self.grid_dims,
         )
 
         # Adjust radar field where radar is larger than zero
@@ -610,23 +674,37 @@ class MergeDifferenceOrdinaryKriging(interpolate.InterpolateOrdinaryKriging, Mer
             )
 
         else:  # Multiplicative
+            exp_interp = np.where(~np.isnan(interpolated), np.exp(interpolated), np.nan)
             adjusted = xr.where(
-                da_rad_threshold > 0, interpolated * da_rad_threshold, 0
+                da_rad_threshold > 0, (da_rad_threshold + 0.01) * exp_interp - 0.01, 0
             )
 
         # Set negative rainfall estimates to zero
         adjusted = adjusted.where(adjusted >= 0, 0)
 
-        # Set gridcells beyond max_distance to nan
+        # Reset interpolated nan to nan (i.e. gridcells beyond max distance)
         adjusted = adjusted.where(~np.isnan(interpolated), np.nan)
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds_field_out = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+                "variance": (self.grid_dims, variance.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds_field_out
 
 
 class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
@@ -646,7 +724,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         variogram_parameters=None,
         grid_location_radar="center",
         discretization=8,
-        min_observations=1,
+        min_observations=3,
         nnear=8,
         max_distance=60000,
         full_line=True,
@@ -654,6 +732,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         fill_radar=True,
         range_checks=None,
         c0_within=False,
+        max_estimate=150,
     ):
         """
         Initialize merging object.
@@ -676,7 +755,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         discretization: int
             Number of points to divide the line into.
         min_observations: int
-            Number of observations needed to perform interpolation.
+            Merging requires more than min_observations valid observations.
+            Otherwise the unadjusted radar field is returned (a grid of nan
+            if fill_radar is False).
         nnear: int
             Number of closest links to use for interpolation
         max_distance: float
@@ -686,10 +767,14 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
             x0 geometry is reformatted to simply reflect the midpoint of the CML.
         radar_threshold: float
             Radar values below this threshold are set to zero rainfall and
-            ignored in the adjustment.
+            ignored in the adjustment. This is not applied to the unadjusted
+            radar field returned when there are too few observations (see
+            min_observations). Threshold the radar before passing it in to
+            get consistent output for all time steps.
         fill_radar: bool
             If True fill cells beyond max_distance from observations with
-            radar observations.
+            radar observations. If False these cells are set to nan, and a
+            grid of nan is returned when there are too few observations.
         range_checks: dict
             Specifies the range checks to apply to the data:
                 - For difference check: {'diff_check': <limit>}.
@@ -700,6 +785,9 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         c0_within: bool
             If True, estimate observation uncertainty using withinblock variance,
             False (default) uses variogram nugget.
+        max_estimate: float
+            Cell values in adjusted fields above this threshold are truncated to
+            max_estimate. Set to False to ignore.i
         """
         # Init interpolator
         interpolate.InterpolateKrigingBase.__init__(
@@ -724,6 +812,7 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         self.radar_threshold = radar_threshold
         self.fill_radar = fill_radar
         self.range_checks = {} if range_checks is None else range_checks
+        self.max_estimate = max_estimate
 
     def _init_interpolator(self, y_grid, x_grid, ds_cmls=None, ds_gauges=None):
         return bk_functions.BKEDTree(
@@ -762,18 +851,20 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         da_gauges: xarray.DataArray
             Gauge observations. Must contain the projected
             coordinates (x, y).
-        da_cmls_sigma: xarray.DataAarray
-            CML uncertainties corresponding to the data in ds_cmls. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+        da_cmls_sigma: xarray.DataArray
+            Error variance of the CML observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
         da_gauges_sigma: xarray.DataArray
-            Gauge uncertainties corresponding to the data in ds_gauges. If set to
-            None, sigma is set to zero. Adds to the variogram nugget.
+            Error variance of the gauge observations. Replaces the variogram
+            nugget for these observations. If set to None, or where nan, the
+            nugget is used.
 
         Returns
         -------
-        da_field_out: xarray.DataArray
-            DataArray with the same structure as the ds_rad but with the
-            interpolated field.
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
         """
         # Set cells where radar is low/zero to zero
         da_rad_threshold = da_rad.where(da_rad > self.radar_threshold, 0)
@@ -797,25 +888,179 @@ class MergeKrigingExternalDrift(interpolate.InterpolateKrigingBase, MergeBase):
         ignore = np.isnan(rad) | np.isnan(obs) | (rad <= 0) | flagged
         obs[ignore] = np.nan  # obs nan are ignored in interpolator
 
-        # If few observations return radar
+        # If few observations return radar grid, or nan grid if not fill_radar
         if (~np.isnan(obs)).sum() <= self.min_observations:
-            return da_rad
+            if self.fill_radar:
+                ds = da_rad.to_dataset(name="rainfall")
+                ds["variance"] = xr.full_like(da_rad, np.nan, dtype=float)
+                return ds
+            return self._nan_dataset(
+                ["rainfall", "variance"], self._get_timestamp(da_cmls, da_gauges)
+            )
 
         # KED merging
-        adjusted = self._interpolator(
+        adjusted, variance = self._interpolator(
             da_rad_threshold.data.ravel(),
             obs,
             rad,
             sigma,
-        ).reshape(self.x_grid.shape)
+        )
+        adjusted = adjusted.reshape(self.x_grid.shape)
+        variance = variance.reshape(self.x_grid.shape)
 
         # Set negative estimates and radar below threshold to zero, keeping nan
         adjusted[((adjusted < 0) | (da_rad_threshold == 0)) & ~np.isnan(adjusted)] = 0
+
+        # Cap large rainfall estimates
+        if self.max_estimate:
+            adjusted = xr.where(
+                adjusted > self.max_estimate, self.max_estimate, adjusted
+            )
 
         # Fill radar to gridcells beyond max_distance
         if self.fill_radar:
             adjusted = xr.where(np.isnan(adjusted), da_rad_threshold, adjusted)
 
-        da = xr.DataArray(data=adjusted, coords=self.grid_coords, dims=self.grid_dims)
-        da.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
-        return da
+        ds_field_out = xr.Dataset(
+            data_vars={
+                "rainfall": (self.grid_dims, adjusted.data),
+                "variance": (self.grid_dims, variance.data),
+            },
+            coords=self.grid_coords,
+        )
+        ds_field_out.coords["time"] = self._get_timestamp(da_cmls, da_gauges)
+
+        return ds_field_out
+
+
+class MergeRADOLAN(MergeBase):
+    """Merge CML and radar using RADOLAN method
+
+    Merges the provided radar field in ds_rad to CML and rain gauge
+    observations by using the RADOLAN method, which is an inverse distance
+    weighting method with a specific weighting function.
+    """
+
+    def __init__(  # pylint: disable=dangerous-default-value
+        self,
+        ds_rad,
+        ds_cmls=None,
+        ds_gauges=None,
+        grid_location_radar="center",
+        radar_threshold=0.01,
+        nnear=8,
+        max_distance=60000,
+        fill_radar=True,
+        range_checks=None,
+        idw_method="radolan",
+        p=0.7,
+        bogra_kwargs={  # noqa: B006
+            "max_iterations": 100,
+            "max_allowed_relative_diff": 3,
+        },
+    ):
+        """Initialize merging object.
+
+        Parameters
+        ----------
+        ds_rad: xarray.Dataset
+            Dataset providing the grid for merging. Must contain
+            projected x_grid and y_grid coordinates.
+        ds_cmls: xarray.Dataset
+            CML geometry. Must contain the projected midpoint
+            coordinates (x, y).
+        ds_gauges: xarray.Dataset
+            Gauge geometry. Must contain the coordinates projected
+            coordinates (x, y).
+        grid_location_radar: str
+            Position of radar.
+        radar_threshold: float
+            Radar values below this threshold are set to zero rainfall and
+            ignored in the adjustment.
+        idw_method : str
+            With the default ("radolan") an exponential decay with range, as in the
+            original RADOLAN implementation, is used for IDW. When set to "standard"
+            a normal IDW decay with 1/d**p is used.
+        nnear : int
+            Number of nearest neighbors to use for interpolation.
+        p : float
+            The exponent used for "standard" IDW with 1/d**p.
+        max_distance : int or float
+            The maximum distance around a station (or mid-point of a CML) to use
+            for interpolation.
+        bogra_kwargs : dict
+            Parameters for the BOGRA smoothing function, see
+            `adjust.bogra_like_smoothing` for details.
+
+        """
+        MergeBase.__init__(self)
+        self.grid_location_radar = grid_location_radar
+        self.nnear = nnear
+        self._update_weights(ds_rad, ds_cmls, ds_gauges)
+        self.radar_threshold = radar_threshold
+        self.max_distance = max_distance
+        self.fill_radar = fill_radar
+        self.range_checks = {} if range_checks is None else range_checks
+        self.idw_method = idw_method
+        self.p = p
+        self.bogra_kwargs = bogra_kwargs
+
+        if ds_cmls is None:
+            self.allow_gauge_and_cml = False
+        else:
+            self.allow_gauge_and_cml = True
+
+    def __call__(
+        self,
+        da_rad,
+        da_cmls=None,
+        da_gauges=None,
+        start_index_in_relevant_stations="random",
+    ):
+        """Adjust radar field for one time step using RADOLAN method
+
+        Parameters
+        ----------
+        da_rad: xarray.DataArray
+            Radar data. Must contain
+            projected x_grid and y_grid coordinates.
+        da_cmls: xarray.DataArray
+            CML observations. Must contain the projected coordinates (site_0_x,
+            site_1_x, site_0_y, site_1_y).
+        da_gauges: xarray.DataArray
+            Gauge observations. Must contain the projected
+            coordinates (x, y).
+        start_index_in_relevant_stations : str or int
+            If set to "random" (which is the default) a random station will be picked as
+            starting point for selecting the audit stations.
+
+        Returns
+        -------
+        ds_field_out: xarray.DataArray
+            Dataset with with the merged rainfall field (variable name
+            .rainfall) and the same coordinates as ds_rad.
+        """
+        if da_cmls is not None:
+            da_cmls = da_cmls.expand_dims("time")
+        if da_gauges is not None:
+            da_gauges = da_gauges.expand_dims("time")
+        df_stations_t = radolan.io.transform_openmrg_data_for_old_radolan_code(
+            ds_cmls=da_cmls, ds_gauges=da_gauges
+        )
+
+        ds_field_out, _ = radolan.processing.rh_to_rw(
+            ds_radolan_t=da_rad.to_dataset(name="RH"),
+            df_stations_t=df_stations_t,
+            start_index_in_relevant_stations=start_index_in_relevant_stations,
+            idw_method=self.idw_method,
+            nnear=self.nnear,
+            p=self.p,
+            max_distance=self.max_distance,
+            bogra_kwargs=self.bogra_kwargs,
+            allow_gauge_and_cml=self.allow_gauge_and_cml,
+            intersect_weights=self.intersect_weights,
+        )
+
+        ds_field_out["rainfall"] = ds_field_out.RW.copy()
+
+        return ds_field_out

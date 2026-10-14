@@ -1,7 +1,7 @@
-"""
-Created on Fri Oct 18 20:21:53 2024
+"""Block kriging functions
 
-@author: erlend
+Provides classes and functions for ordinary block kriging (OBK) interpolation
+and Block kriging with external drift merging using KDTree.
 """
 
 import numpy as np
@@ -138,14 +138,14 @@ class OBKrigTree:
         mat[:-1, -1] = np.ones(cov_mat.shape[0])  # lagrange multipliers
 
         # Midpoint coordinates of observations
-        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        x_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
         xgrid = x_grid.ravel()
         ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours, strict=False))
+            data=list(zip(y_neighbours, x_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
@@ -189,9 +189,11 @@ class OBKrigTree:
             1D array containing cml and gauge observations in the correct
             order.
         sigma: numpy array
-            1D array containing the uncertainty associated with the cml and
-            rain gauge observations. If None, the uncertainty estimated from
-            variogram in init is used instead.
+            1D array containing the error variance of the cml and rain gauge
+            observations, in the same order as obs. Replaces the nugget (or
+            the within-block variance if c0_within=True) on the diagonal of
+            the kriging matrix. Where sigma is nan, or if sigma is None, the
+            nugget (or within-block variance) is used.
 
         Returns
         -------
@@ -202,9 +204,11 @@ class OBKrigTree:
         # Get kriging matrix
         mat = self.mat.copy()
 
-        # If sigma is given, overwrite diagonal
+        # If sigma is given, overwrite diagonal where sigma is not nan
         if sigma is not None:
-            np.fill_diagonal(mat, np.append(sigma, 0))
+            diag = np.diag(mat).copy()
+            diag[: self.n_obs] = np.where(np.isnan(sigma), diag[: self.n_obs], sigma)
+            np.fill_diagonal(mat, diag)
 
         # Indices from nearest neighbour
         ixs = self.ixs.copy()
@@ -222,7 +226,9 @@ class OBKrigTree:
 
         # array for storing CML-radar merge
         est_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
+        var_with_nan = np.full_like(est_with_nan, np.nan)
         estimate = np.zeros(ixs.shape[0])
+        variance = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(ixs.shape[0]):
@@ -239,14 +245,20 @@ class OBKrigTree:
             i_mat = np.append(ind, self.n_obs)
 
             # Solve the kriging system
-            w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-1]
+            x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)
+            w = x[:-1]
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
 
+            # Estimate variance
+            variance[i] = -x.dot(target)
+
         # Return dataset with interpolated values
         est_with_nan[~mask] = estimate
-        return est_with_nan
+        var_with_nan[~mask] = variance
+
+        return est_with_nan, var_with_nan
 
 
 class BKEDTree:
@@ -379,14 +391,14 @@ class BKEDTree:
         mat[:-2, -2] = np.ones(cov_mat.shape[0])  # non-bias condition
 
         # Midpoint coordinates of observations
-        x_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
-        y_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
+        y_neighbours = x0[:, 0, int(x0.shape[2] / 2)]
+        x_neighbours = x0[:, 1, int(x0.shape[2] / 2)]
 
         # Get neighbourhood obs for all gridpoints
         xgrid = x_grid.ravel()
         ygrid = y_grid.ravel()
         tree_neighbors = scipy.spatial.KDTree(
-            data=list(zip(x_neighbours, y_neighbours, strict=False))
+            data=list(zip(y_neighbours, x_neighbours, strict=False))
         )
 
         distances, ixs = tree_neighbors.query(
@@ -437,9 +449,11 @@ class BKEDTree:
         rad_obs numpy.arrays
             Radar observations at ground.
         sigma: numpy array
-            1D array containing the uncertainty associated with the cml and
-            rain gauge observations. If None, the uncertainty estimated from
-            variogram in init is used instead.
+            1D array containing the error variance of the cml and rain gauge
+            observations, in the same order as obs. Replaces the nugget (or
+            the within-block variance if c0_within=True) on the diagonal of
+            the kriging matrix. Where sigma is nan, or if sigma is None, the
+            nugget (or within-block variance) is used.
 
         Returns
         -------
@@ -450,9 +464,11 @@ class BKEDTree:
         # Get kriging matrix
         mat = self.mat.copy()
 
-        # If sigma is given, overwrite diagonal
+        # If sigma is given, overwrite diagonal where sigma is not nan
         if sigma is not None:
-            np.fill_diagonal(mat, np.append(sigma, [0, 0]))
+            diag = np.diag(mat).copy()
+            diag[: self.n_obs] = np.where(np.isnan(sigma), diag[: self.n_obs], sigma)
+            np.fill_diagonal(mat, diag)
 
         # Set drift term in kriging matrix
         mat[-1, :-2] = rad_obs  # Radar drift
@@ -475,7 +491,9 @@ class BKEDTree:
 
         # array for storing CML-radar merge
         est_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
+        var_with_nan = np.full_like(np.zeros(self.ixs.shape[0]), np.nan)
         estimate = np.zeros(ixs.shape[0])
+        variance = np.zeros(ixs.shape[0])
 
         # Compute the contributions from nearby CMLs to points in grid
         for i in range(ixs.shape[0]):
@@ -493,18 +511,22 @@ class BKEDTree:
 
             # If all radar observations are the same, this defaults to OK
             if (mat[-1, ind] == mat[-1, ind[0]]).all():
-                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
-                w = w[:-1]
+                x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)][:-1, :-1], target[:-1])
+                w = x[:-1]
+                variance[i] = -x.dot(target[:-1])
             else:
                 # Solve the kriging system
-                w = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)[:-2]
+                x = np.linalg.solve(mat[np.ix_(i_mat, i_mat)], target)
+                w = x[:-2]
+                variance[i] = -x.dot(target)
 
             # Estimate rainfall amounts at location i
             estimate[i] = obs[ind] @ w
 
         # Return dataset with interpolated values
         est_with_nan[~mask] = estimate
-        return est_with_nan
+        var_with_nan[~mask] = variance
+        return est_with_nan, var_with_nan
 
 
 def within_block_l(x0):

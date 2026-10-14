@@ -1,7 +1,4 @@
-"""Copyright (c) 2024 Christian Chwala. All rights reserved.
-
-submodules for RADOLAN adjustment
-"""
+"""Submodules for RADOLAN adjustment"""
 
 __all__ = ["adjust", "processing", "io", "check_data_struct"]
 

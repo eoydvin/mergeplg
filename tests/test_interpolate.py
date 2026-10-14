@@ -73,7 +73,7 @@ def test_interpolator_OK_exact_at_points():
     # Test that providing only RG works
     interpolated = interpolator(
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for gauge_id in ds_gauges_t1.id:
         merge_r = interpolated.sel(
             x=ds_gauges_t1.sel(id=gauge_id).x.data,
@@ -89,7 +89,7 @@ def test_interpolator_OK_exact_at_points():
     # Test that providing only CML works
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -106,7 +106,7 @@ def test_interpolator_OK_exact_at_points():
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -146,7 +146,7 @@ def test_interpolator_IDW_exact_at_points():
     # Test that providing only RG works
     interpolated = interpolator(
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for gauge_id in ds_gauges_t1.id:
         merge_r = interpolated.sel(
             x=ds_gauges_t1.sel(id=gauge_id).x.data,
@@ -162,7 +162,7 @@ def test_interpolator_IDW_exact_at_points():
     # Test that providing only CML works
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -179,7 +179,7 @@ def test_interpolator_IDW_exact_at_points():
     interpolated = interpolator(
         da_cmls=ds_cmls_t1.R,
         da_gauges=ds_gauges_t1.R,
-    )
+    ).rainfall
     for cml_id in ds_cmls_t1.cml_id:
         merge_r = interpolated.sel(
             x=ds_cmls_t1.sel(cml_id=cml_id).x.data,
@@ -284,7 +284,7 @@ def test_kedpoint_vs_pykrige():
     interp_field = interpolate_ked(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Setup pykrige
     ked = pykrige.UniversalKriging(
@@ -339,7 +339,7 @@ def test_kedpoint_vs_pykrige_radarisone():
     interp_field = interpolate_ked(
         da_rad=da_rad_t,
         da_gauges=da_gauges_t,
-    )
+    ).rainfall
 
     # Get value at gauges
     rad = da_rad_t.sel(x=da_gauges_t.x, y=da_gauges_t.y).data
@@ -401,7 +401,7 @@ def test_kud_ked():
         da_gauges=ds_gauges_t.R,
         da_cmls_sigma=ds_cmls_t.sigma,
         da_gauges_sigma=ds_gauges_t.sigma,
-    )
+    ).rainfall
 
     # Test CML exact at 3 gridpoints (discretization = 2)
     cml_avrg = ds_cmls_t.R.data
@@ -452,7 +452,7 @@ def test_kud_ok():
         da_gauges=ds_gauges_t.R,
         da_cmls_sigma=ds_cmls_t.sigma,
         da_gauges_sigma=ds_gauges_t.sigma,
-    )
+    ).rainfall
 
     # Test CML exact at 3 gridpoints (discretization = 2)
     cml_avrg = ds_cmls_t.R.data
@@ -493,7 +493,7 @@ def test_blockkriging_vs_pykrige():
     # Interpolate field
     interp_field = interpolate_krig(
         da_cmls=ds_cml_t1.R,
-    )
+    ).rainfall
 
     x_mid = 0.5 * (ds_cml_t1.site_0_x + ds_cml_t1.site_1_x).data
     y_mid = 0.5 * (ds_cml_t1.site_0_y + ds_cml_t1.site_1_y).data
@@ -519,3 +519,79 @@ def test_blockkriging_vs_pykrige():
     interp_field_pykrige = z.reshape(ds_grid.x_grid.shape)
 
     np.testing.assert_almost_equal(interp_field_pykrige, interp_field)
+
+
+@pytest.mark.parametrize("method", ["ok", "ked"])
+def test_kud_missing_sigma_falls_back_to_nugget(method):
+    ds_cmls_t = ds_cmls.isel(cml_id=[0, 1], time=0)
+    ds_gauges_t = ds_gauges.isel(id=[0, 2], time=0)
+    ds_grid_t = ds_rad.isel(time=0)
+    da_rad_t = ds_grid_t.R.copy()
+    da_rad_t.data = np.arange(1, 17, dtype=float).reshape(4, 4)
+
+    nugget = 0.5
+    kwargs = {
+        "ds_cmls": ds_cmls_t,
+        "ds_gauges": ds_gauges_t,
+        "variogram_parameters": {"sill": 1, "range": 2, "nugget": nugget},
+        "nnear": 12,
+        "discretization": 2,
+        "min_observations": 1,
+    }
+    if method == "ok":
+        interpolator = interpolate.InterpolateOrdinaryKriging(
+            ds_grid=ds_grid_t, **kwargs
+        )
+        run = interpolator
+    else:
+        interpolator = merge.MergeKrigingExternalDrift(ds_rad=ds_grid_t, **kwargs)
+
+        def run(**kw):
+            return interpolator(da_rad=da_rad_t, **kw)
+
+    # Reference without any sigma, nugget used for all observations
+    reference = run(da_cmls=ds_cmls_t.R, da_gauges=ds_gauges_t.R)
+
+    # Sigma equal to nugget for CMLs only, gauges must fall back to nugget
+    sigma_nugget = run(
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        da_cmls_sigma=xr.full_like(ds_cmls_t.R, nugget, dtype=float),
+    )
+
+    # Nan sigma must fall back to nugget
+    sigma_nan = run(
+        da_cmls=ds_cmls_t.R,
+        da_gauges=ds_gauges_t.R,
+        da_cmls_sigma=xr.full_like(ds_cmls_t.R, np.nan, dtype=float),
+    )
+
+    assert np.isfinite(reference.rainfall).all()
+    for result in [sigma_nugget, sigma_nan]:
+        np.testing.assert_allclose(result.rainfall, reference.rainfall)
+        np.testing.assert_allclose(result.variance, reference.variance)
+
+
+@pytest.mark.parametrize(
+    ("interpolator_class", "data_vars"),
+    [
+        (interpolate.InterpolateIDW, ["rainfall"]),
+        (interpolate.InterpolateOrdinaryKriging, ["rainfall", "variance"]),
+    ],
+)
+def test_few_obs_returns_nan_dataset(interpolator_class, data_vars):
+    # Two gauges, too few for min_observations=3
+    ds_gauges_t = ds_gauges.isel(id=[0, 1], time=0)
+    interpolator = interpolator_class(
+        ds_grid=ds_rad,
+        ds_gauges=ds_gauges_t,
+        min_observations=3,
+    )
+    interpolated = interpolator(da_gauges=ds_gauges_t.R)
+
+    # Same output structure as when interpolating, with nan in all cells
+    assert isinstance(interpolated, xr.Dataset)
+    for name in data_vars:
+        assert interpolated[name].shape == ds_rad.x_grid.shape
+        assert np.isnan(interpolated[name].data).all()
+    assert interpolated.time == ds_gauges_t.time
