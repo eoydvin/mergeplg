@@ -8,9 +8,10 @@
 :caption: Examples
 :hidden:
 
-notebooks/openMRG_case_highlevel.ipynb
-notebooks/OpenRainER_case_highlevel.ipynb
-notebooks/openMRG_case_RADOLAN.ipynb
+notebooks/Introduction.ipynb
+notebooks/OpenMRG_case.ipynb
+notebooks/OpenRainER_case.ipynb
+notebooks/OpenMRG_case_RADOLAN.ipynb
 ```
 
 ```{toctree}
