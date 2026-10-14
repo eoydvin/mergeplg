@@ -8,7 +8,7 @@
 :caption: Examples
 :hidden:
 
-notebooks/Introduction.ipynb
+notebooks/Overview.ipynb
 notebooks/OpenMRG_case.ipynb
 notebooks/OpenRainER_case.ipynb
 notebooks/OpenMRG_case_RADOLAN.ipynb
